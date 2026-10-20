@@ -1,0 +1,65 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-slate-950 text-slate-100;
+  }
+}
+
+/* Print Stylesheet for Print & Save as PDF */
+@media print {
+  body {
+    background-color: white !important;
+    color: #0f172a !important;
+  }
+
+  /* Hide interactive navigation, toolbar, inputs, and settings in print */
+  header,
+  footer,
+  .no-print,
+  button,
+  input,
+  .action-toolbar {
+    display: none !important;
+  }
+
+  /* Ensure card backgrounds and borders are crisp on white paper */
+  .print-container {
+    padding: 0 !important;
+    margin: 0 !important;
+    max-width: 100% !important;
+    box-shadow: none !important;
+  }
+
+  .print-card {
+    background-color: #f8fafc !important;
+    border: 1px solid #cbd5e1 !important;
+    color: #0f172a !important;
+    break-inside: avoid;
+    margin-bottom: 1rem !important;
+  }
+
+  .print-text-dark {
+    color: #0f172a !important;
+  }
+
+  .print-text-muted {
+    color: #475569 !important;
+  }
+
+  a {
+    text-decoration: underline !important;
+    color: #0369a1 !important;
+  }
+
+  /* Show print report header */
+  .print-only-header {
+    display: block !important;
+  }
+}
+
+.print-only-header {
+  display: none;
+}
