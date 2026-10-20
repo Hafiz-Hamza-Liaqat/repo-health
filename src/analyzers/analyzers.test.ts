@@ -166,6 +166,219 @@ No installation heading here.
       const doc04 = findings.find((f) => f.ruleId === 'DOC-04');
       expect(doc04?.status).toBe('not_detected');
     });
+
+    describe('Tightened README Evidence Rules (DOC-04 & DOC-06)', () => {
+      const baseRepo: typeof mockRepoData = {
+        ...mockRepoData,
+        homepage: null, // Clear homepage by default so demo is not assumed
+      };
+
+      const makeReadme = (md: string) => ({
+        name: 'README.md',
+        path: 'README.md',
+        sha: 'mock-sha',
+        size: md.length,
+        url: 'https://api.github.com/repos/acme/sample/readme',
+        html_url: 'https://github.com/acme/sample#readme',
+        download_url: '',
+        content: btoa(md),
+        encoding: 'base64',
+        decodedContent: md,
+      });
+
+      // 1. A README with a methodology section and code blocks elsewhere, but no usage section
+      it('1. should NOT award usage points for a methodology section with code blocks elsewhere when no usage section exists', () => {
+        const md = `# Analytics Tool
+
+## 1. Project Purpose
+Calculates code metrics.
+
+## 2. Scoring Methodology
+Our formula uses linear regression:
+\`\`\`python
+score = sum(w * f for w, f in zip(weights, features))
+\`\`\`
+
+## 3. Installation
+\`\`\`bash
+pip install -r requirements.txt
+\`\`\`
+`;
+        const findings = analyzeReadme(makeReadme(md), baseRepo, ['README.md']);
+        const doc04 = findings.find((f) => f.ruleId === 'DOC-04');
+        expect(doc04?.status).toBe('not_detected');
+        expect(doc04?.scoreEffect).toBe(0);
+        expect(doc04?.explanation).toContain('No dedicated usage section');
+      });
+
+      // 2. A valid usage section with relevant code examples
+      it('2. should award full points for a valid usage section with relevant code examples', () => {
+        const md = `# Dev Tool
+
+## Overview
+A CLI and library for project analysis.
+
+## Usage
+Run the CLI:
+\`\`\`bash
+repo-health https://github.com/facebook/react --json
+\`\`\`
+
+Or use the programmatic TypeScript API:
+\`\`\`typescript
+import { analyze } from 'repo-health';
+const report = await analyze('https://github.com/facebook/react');
+console.log(report.score);
+\`\`\`
+`;
+        const findings = analyzeReadme(makeReadme(md), baseRepo, ['README.md']);
+        const doc04 = findings.find((f) => f.ruleId === 'DOC-04');
+        expect(doc04?.status).toBe('pass');
+        expect(doc04?.scoreEffect).toBe(3);
+        expect(doc04?.evidence?.value).toContain('Usage');
+        expect(doc04?.evidence?.value).toContain('code examples');
+      });
+
+      // 3. A README with setup commands and test instructions but no usage examples
+      it('3. should return not_detected for a README with setup commands and test instructions but no usage examples', () => {
+        const md = `# Web Application
+
+## Setup and Installation
+\`\`\`bash
+npm install
+npm run build
+\`\`\`
+
+## Verification and Quality Commands
+\`\`\`bash
+npm run typecheck
+npm run lint
+npm test
+\`\`\`
+`;
+        const findings = analyzeReadme(makeReadme(md), baseRepo, ['README.md']);
+        const doc04 = findings.find((f) => f.ruleId === 'DOC-04');
+        expect(doc04?.status).toBe('not_detected');
+        expect(doc04?.scoreEffect).toBe(0);
+      });
+
+      // 4. A generic "Setup and Development Commands" heading without contribution instructions
+      it('4. should NOT award contribution points for a generic "Setup and Development Commands" heading without contribution instructions', () => {
+        const md = `# Backend Service
+
+## Overview
+Backend API service.
+
+## Setup and Development Commands
+\`\`\`bash
+npm install
+npm run dev
+\`\`\`
+`;
+        const findings = analyzeReadme(makeReadme(md), baseRepo, ['README.md', 'package.json']);
+        const doc06 = findings.find((f) => f.ruleId === 'DOC-06');
+        expect(doc06?.status).toBe('warning');
+        expect(doc06?.scoreEffect).toBe(0);
+        expect(doc06?.explanation).toContain('development setup commands, but lacks formal contribution guidelines');
+      });
+
+      // 5. A genuine contribution guide in the README
+      it('5. should award full points for a genuine contribution guide heading in the README', () => {
+        const md = `# Open Source Library
+
+## Overview
+General utility library.
+
+## Contributing
+We welcome contributions! Please open an issue to discuss your proposal before submitting a pull request.
+Make sure all tests pass and follow our code conventions.
+`;
+        const findings = analyzeReadme(makeReadme(md), baseRepo, ['README.md']);
+        const doc06 = findings.find((f) => f.ruleId === 'DOC-06');
+        expect(doc06?.status).toBe('pass');
+        expect(doc06?.scoreEffect).toBe(2);
+        expect(doc06?.evidence?.value).toContain('Contributing');
+      });
+
+      // 6. A genuine CONTRIBUTING.md file detected through the repository tree
+      it('6. should award full points when a genuine CONTRIBUTING.md file is detected in the repository tree', () => {
+        const md = `# Cool Project
+
+## Overview
+Project overview without a contributing heading in the README.
+`;
+        // Tree has CONTRIBUTING.md
+        const findingsRoot = analyzeReadme(makeReadme(md), baseRepo, ['README.md', 'package.json', 'CONTRIBUTING.md']);
+        const doc06Root = findingsRoot.find((f) => f.ruleId === 'DOC-06');
+        expect(doc06Root?.status).toBe('pass');
+        expect(doc06Root?.scoreEffect).toBe(2);
+        expect(doc06Root?.evidence?.value).toContain('CONTRIBUTING.md');
+
+        // Supported equivalent: .github/CONTRIBUTING.md
+        const findingsGithub = analyzeReadme(makeReadme(md), baseRepo, ['README.md', '.github/CONTRIBUTING.md']);
+        const doc06Github = findingsGithub.find((f) => f.ruleId === 'DOC-06');
+        expect(doc06Github?.status).toBe('pass');
+        expect(doc06Github?.evidence?.value).toContain('.github/CONTRIBUTING.md');
+
+        // Negative check: text mention of CONTRIBUTING.md without file in tree does NOT pass
+        const mdWithMention = `# Project\n\nSee [CONTRIBUTING.md](CONTRIBUTING.md) for details.`;
+        const findingsNoFile = analyzeReadme(makeReadme(mdWithMention), baseRepo, ['README.md']);
+        const doc06NoFile = findingsNoFile.find((f) => f.ruleId === 'DOC-06');
+        expect(doc06NoFile?.status).toBe('warning');
+        expect(doc06NoFile?.scoreEffect).toBe(0);
+        expect(doc06NoFile?.evidence?.value).toContain('references CONTRIBUTING.md but no corresponding file exists');
+      });
+
+      // 7. A valid live demo URL
+      it('7. should award full points when a valid live demo URL is present in homepage or README', () => {
+        // Case A: via repo homepage
+        const repoWithHomepage: typeof mockRepoData = {
+          ...baseRepo,
+          homepage: 'https://repohealth-preview.vercel.app',
+        };
+        const mdA = `# Project\n\n## Overview\nSimple project.`;
+        const findingsA = analyzeReadme(makeReadme(mdA), repoWithHomepage, ['README.md']);
+        const doc06A = findingsA.find((f) => f.ruleId === 'DOC-06');
+        expect(doc06A?.status).toBe('pass');
+        expect(doc06A?.scoreEffect).toBe(2);
+        expect(doc06A?.evidence?.value).toContain('https://repohealth-preview.vercel.app');
+
+        // Case B: via explicit markdown link in README
+        const mdB = `# Project\n\nCheck out our [Live Demo](https://demo.repohealth.dev) for a quick trial.`;
+        const findingsB = analyzeReadme(makeReadme(mdB), baseRepo, ['README.md']);
+        const doc06B = findingsB.find((f) => f.ruleId === 'DOC-06');
+        expect(doc06B?.status).toBe('pass');
+        expect(doc06B?.scoreEffect).toBe(2);
+        expect(doc06B?.evidence?.value).toContain('https://demo.repohealth.dev');
+      });
+
+      // 8. Missing or incomplete evidence
+      it('8. should return partial or warning for missing or incomplete evidence', () => {
+        // Incomplete usage: usage section exists, but has only setup/test commands
+        const mdSetupOnly = `# Tool
+
+## Usage
+\`\`\`bash
+npm install
+npm test
+\`\`\`
+`;
+        const findingsUsage = analyzeReadme(makeReadme(mdSetupOnly), baseRepo, ['README.md']);
+        const doc04Partial = findingsUsage.find((f) => f.ruleId === 'DOC-04');
+        expect(doc04Partial?.status).toBe('warning');
+        expect(doc04Partial?.scoreEffect).toBe(1);
+        expect(doc04Partial?.explanation).toContain('contains setup or test commands rather than concrete usage examples');
+
+        // Completely missing README
+        const findingsMissing = analyzeReadme(null, baseRepo, []);
+        const doc04Missing = findingsMissing.find((f) => f.ruleId === 'DOC-04');
+        const doc06Missing = findingsMissing.find((f) => f.ruleId === 'DOC-06');
+        expect(doc04Missing?.status).toBe('not_detected');
+        expect(doc04Missing?.scoreEffect).toBe(0);
+        expect(doc06Missing?.status).toBe('not_detected');
+        expect(doc06Missing?.scoreEffect).toBe(0);
+      });
+    });
   });
 
   describe('License Analyzer', () => {

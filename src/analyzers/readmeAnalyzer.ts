@@ -82,9 +82,120 @@ function matchesHeadingPattern(heading: MarkdownHeading, patterns: (string | Reg
   });
 }
 
+/**
+ * Retrieves the markdown content for a specific heading section,
+ * bounded by the next heading of equal or higher level (or end of document).
+ */
+export function getSectionContent(
+  heading: MarkdownHeading,
+  allHeadings: MarkdownHeading[],
+  rawContent: string
+): string {
+  if (!rawContent) return '';
+  const lines = rawContent.split('\n');
+
+  const currentIdx = allHeadings.findIndex(
+    (h) => h.lineNumber === heading.lineNumber && h.rawText === heading.rawText
+  );
+
+  let endLineNumber = lines.length + 1; // 1-indexed, exclusive boundary
+
+  if (currentIdx !== -1) {
+    for (let i = currentIdx + 1; i < allHeadings.length; i++) {
+      if (allHeadings[i].level <= heading.level) {
+        endLineNumber = allHeadings[i].lineNumber;
+        break;
+      }
+    }
+  }
+
+  const startLineIdx = heading.lineNumber; // 1-indexed heading.lineNumber is index in 0-indexed lines
+  const endLineIdx = endLineNumber - 1;
+
+  if (startLineIdx >= lines.length) return '';
+  return lines.slice(startLineIdx, Math.max(startLineIdx, endLineIdx)).join('\n');
+}
+
+/**
+ * Extracts all fenced code blocks from markdown text.
+ */
+export function extractFencedCodeBlocks(markdownText: string): string[] {
+  const blockRegex = /```[a-zA-Z0-9_-]*\s*\n([\s\S]*?)\n```/g;
+  const blocks: string[] = [];
+  let match: RegExpExecArray | null;
+  while ((match = blockRegex.exec(markdownText)) !== null) {
+    if (match[1].trim().length > 0) {
+      blocks.push(match[1].trim());
+    }
+  }
+  return blocks;
+}
+
+/**
+ * Detects if a shell line is purely an installation, build, or test execution command.
+ */
+export function isSetupOrTestCommandLine(rawLine: string): boolean {
+  const line = rawLine.trim().replace(/^[$#>]\s*/, '');
+  if (!line || line.startsWith('#') || line.startsWith('//')) return false;
+
+  return /^(?:git\s+clone\b|cd\b|npm\s+(?:install|i|ci|add|build|run\s+build|test|run\s+test|run\s+test:[^\s]+|run\s+lint|run\s+typecheck|run\s+check)|yarn\s+(?:install|add|build|test|lint)|pnpm\s+(?:install|add|build|test|lint|i)|pip[0-9]*\s+install\b|poetry\s+(?:install|build)|cargo\s+(?:build|install|test)|go\s+(?:get|build|install|test)|vitest\b|jest\b|pytest\b|playwright\s+test\b|python(?:3)?\s+-m\s+(?:pytest|unittest)|mvn\s+(?:clean|install|test)|gradle\s+(?:build|test)|tsc\s+--noEmit)/i.test(line);
+}
+
+/**
+ * Checks whether code within a fenced code block represents meaningful usage examples,
+ * rather than strictly setup, build, or test commands.
+ */
+export function isMeaningfulUsageCode(codeText: string): boolean {
+  const lines = codeText
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0 && !l.startsWith('#') && !l.startsWith('//'));
+
+  if (lines.length === 0) return false;
+
+  const allSetupOrTest = lines.every((l) => isSetupOrTestCommandLine(l));
+  return !allSetupOrTest;
+}
+
+/**
+ * Extracts a real external deployment or demo URL from repo metadata or README content.
+ */
+export function findLiveDemoUrl(repoHomepage?: string | null, readmeContent?: string): string | null {
+  if (repoHomepage && typeof repoHomepage === 'string') {
+    const trimmed = repoHomepage.trim();
+    if (/^https?:\/\//i.test(trimmed)) {
+      // Exclude if it merely points back to the GitHub repository itself
+      if (!/github\.com\/[^/]+\/[^/]+(?:\/)?$/i.test(trimmed)) {
+        return trimmed;
+      }
+    }
+  }
+
+  if (readmeContent) {
+    // Check explicit markdown link labeled as demo or live preview
+    const explicitDemoLink = readmeContent.match(
+      /\[(?:live\s+demo|demo|live\s+preview|live\s+app|deployment|live\s+deployment|preview)\]\((https?:\/\/[^\s)]+)\)/i
+    );
+    if (explicitDemoLink && explicitDemoLink[1]) {
+      return explicitDemoLink[1].trim();
+    }
+
+    // Check standard production/preview deployment hosting domains
+    const hostingDomainMatch = readmeContent.match(
+      /(https?:\/\/[a-zA-Z0-9_-]+\.(?:vercel\.app|netlify\.app|github\.io|pages\.dev|fly\.dev|herokuapp\.com|onrender\.com|railway\.app|surge\.sh)(?:\/[^\s)]*)?)/i
+    );
+    if (hostingDomainMatch && hostingDomainMatch[1]) {
+      return hostingDomainMatch[1].trim();
+    }
+  }
+
+  return null;
+}
+
 export function analyzeReadme(
   readme: GitHubReadme | null,
-  repo: GitHubRepo
+  repo: GitHubRepo,
+  filePaths: string[] = []
 ): Finding[] {
   const findings: Finding[] = [];
   const content = readme?.decodedContent || '';
@@ -363,31 +474,48 @@ export function analyzeReadme(
 
   // DOC-04: Usage Examples / Quick Start
   const doc04Rule = SCORING_RULES['DOC-04'];
-  const usagePatterns = [
+  const usagePatterns: (string | RegExp)[] = [
     'usage',
-    'usage guide',
     'how to use',
     'examples',
     'example',
-    'quick start',
-    'walkthrough',
-    'guide',
-    'api',
     'cli usage',
-    'commands',
-    'development commands',
-    'verification commands',
-    'scoring methodology',
-    'running',
+    'api usage',
+    'quick start',
+    'getting started',
+    'basic usage',
+    'usage guide',
+    'usage examples',
+    'code examples',
+    'sample usage',
+    'sample code',
   ];
 
-  const matchedUsageHeading = headings.find((h) =>
+  const matchedUsageHeadings = headings.filter((h) =>
     matchesHeadingPattern(h, usagePatterns)
   );
 
-  const hasCodeBlocks = /```[a-zA-Z]*\n[\s\S]{10,}\n```/.test(content);
+  let hasValidUsageSectionWithCode = false;
+  let matchedUsageWithCodeHeading: MarkdownHeading | null = null;
+  let usageSectionHasOnlySetupOrTest = false;
 
-  if (matchedUsageHeading && hasCodeBlocks) {
+  for (const h of matchedUsageHeadings) {
+    const sectionText = getSectionContent(h, headings, content);
+    const codeBlocks = extractFencedCodeBlocks(sectionText);
+
+    if (codeBlocks.length > 0) {
+      const hasMeaningful = codeBlocks.some((b) => isMeaningfulUsageCode(b));
+      if (hasMeaningful) {
+        hasValidUsageSectionWithCode = true;
+        matchedUsageWithCodeHeading = h;
+        break;
+      } else {
+        usageSectionHasOnlySetupOrTest = true;
+      }
+    }
+  }
+
+  if (hasValidUsageSectionWithCode && matchedUsageWithCodeHeading) {
     findings.push({
       id: 'DOC-04-pass',
       ruleId: 'DOC-04',
@@ -397,14 +525,19 @@ export function analyzeReadme(
       severity: 'info',
       scoreEffect: doc04Rule.basePoints,
       maxEffect: doc04Rule.basePoints,
-      explanation: `README provides dedicated usage instructions under "${matchedUsageHeading.rawText}" supported by formatted code blocks.`,
+      explanation: `README provides dedicated usage instructions under section "${matchedUsageWithCodeHeading.rawText}" supported by relevant code examples.`,
       evidence: {
         label: 'Usage Section',
-        value: `"${matchedUsageHeading.rawText}" with code blocks`,
+        value: `"${matchedUsageWithCodeHeading.rawText}" with code examples`,
         sourceUrl: readmeUrl,
       },
     });
-  } else if (hasCodeBlocks || matchedUsageHeading) {
+  } else if (matchedUsageHeadings.length > 0) {
+    const firstUsageHeading = matchedUsageHeadings[0];
+    const reason = usageSectionHasOnlySetupOrTest
+      ? `contains setup or test commands rather than concrete usage examples`
+      : `lacks executable code blocks or runnable examples`;
+
     findings.push({
       id: 'DOC-04-warning',
       ruleId: 'DOC-04',
@@ -414,11 +547,11 @@ export function analyzeReadme(
       severity: 'low',
       scoreEffect: 1,
       maxEffect: doc04Rule.basePoints,
-      explanation: 'Found code blocks or usage headers, but examples appear limited in scope.',
+      explanation: `Usage section "${firstUsageHeading.rawText}" is present in the README, but ${reason}.`,
       recommendation: 'Include practical, copy-pasteable usage examples showing how to interact with the project.',
       evidence: {
         label: 'Observation',
-        value: hasCodeBlocks ? 'Code blocks present without dedicated usage section' : `Usage header "${matchedUsageHeading?.rawText}" present without code examples`,
+        value: `Usage section "${firstUsageHeading.rawText}" lacks executable usage examples`,
         sourceUrl: readmeUrl,
       },
     });
@@ -432,11 +565,11 @@ export function analyzeReadme(
       severity: 'medium',
       scoreEffect: 0,
       maxEffect: doc04Rule.basePoints,
-      explanation: 'No dedicated usage instructions or code blocks were found in the README.',
+      explanation: 'No dedicated usage section (e.g., "Usage", "How to Use", "Examples", "CLI Usage", "Quick Start") was found in the README.',
       recommendation: 'Add a "Usage" section demonstrating the project with concise code examples.',
       evidence: {
         label: 'Observation',
-        value: 'No usage headers or example code blocks detected',
+        value: 'No dedicated usage section or code examples found in README',
         sourceUrl: readmeUrl,
       },
     });
@@ -501,27 +634,44 @@ export function analyzeReadme(
 
   // DOC-06: Contribution Guidance / Live Demo Links
   const doc06Rule = SCORING_RULES['DOC-06'];
-  const contribPatterns = [
+  const contribPatterns: (string | RegExp)[] = [
     'contributing',
     'contribution',
-    'contribute',
-    'development',
-    'guidelines',
-    'developer guide',
+    'contribution guidelines',
+    'contributions',
+    'how to contribute',
+    'contributing guide',
+    'code of conduct',
+    'community guidelines',
   ];
 
   const matchedContribHeading = headings.find((h) =>
     matchesHeadingPattern(h, contribPatterns)
   );
 
-  const hasContribFile = /contributing\.md/i.test(content);
-  const hasDemo = /(?:https?:\/\/[^\s)]+(?:vercel\.app|netlify\.app|github\.io|pages\.dev|fly\.dev|herokuapp\.com|onrender\.com))/i.test(content) || !!repo.homepage;
+  // Inspect the repository tree to find actual contribution files
+  const contribFileRegex = /(?:^|\/|\.github\/)contributing\.(?:md|markdown|rst|txt)$/i;
+  const matchedContribFile = filePaths.find((p) => contribFileRegex.test(p));
 
-  if (matchedContribHeading || hasContribFile || hasDemo) {
+  // Find real live demo / deployment URL
+  const demoUrl = findLiveDemoUrl(repo.homepage, content);
+
+  if (matchedContribHeading || matchedContribFile || demoUrl) {
     const signals: string[] = [];
-    if (matchedContribHeading) signals.push(`Contributing section ("${matchedContribHeading.rawText}")`);
-    else if (hasContribFile) signals.push('Contributing guide reference');
-    if (hasDemo) signals.push('Live demo / deployment link');
+    const evidenceDetails: string[] = [];
+
+    if (matchedContribHeading) {
+      signals.push(`Contributing section in README ("${matchedContribHeading.rawText}")`);
+      evidenceDetails.push(`Section "${matchedContribHeading.rawText}"`);
+    }
+    if (matchedContribFile) {
+      signals.push(`Repository contribution file ("${matchedContribFile}")`);
+      evidenceDetails.push(`File "${matchedContribFile}"`);
+    }
+    if (demoUrl) {
+      signals.push(`Live deployment URL ("${demoUrl}")`);
+      evidenceDetails.push(`Live demo "${demoUrl}"`);
+    }
 
     findings.push({
       id: 'DOC-06-pass',
@@ -532,14 +682,30 @@ export function analyzeReadme(
       severity: 'info',
       scoreEffect: doc06Rule.basePoints,
       maxEffect: doc06Rule.basePoints,
-      explanation: `Repository provides additional developer guidance: ${signals.join(', ')}.`,
+      explanation: `Repository provides developer contribution guidance or live demo: ${signals.join('; ')}.`,
       evidence: {
-        label: 'Detected Signals',
-        value: signals.join(' and '),
-        sourceUrl: readmeUrl,
+        label: 'Contribution / Demo Evidence',
+        value: evidenceDetails.join(' and '),
+        sourcePath: matchedContribFile || (readme?.path || 'README.md'),
+        sourceUrl: demoUrl || readmeUrl,
       },
     });
   } else {
+    const textMentionsContribFile = /contributing\.md/i.test(content);
+    const hasDevSetupHeading = headings.some((h) =>
+      /(?:setup|development|dev commands|development commands)/i.test(h.normalizedText)
+    );
+    let observationText = 'No dedicated contribution section, CONTRIBUTING.md file, or live demo URL found';
+    let explanationText = 'README does not provide contribution guidelines (e.g., "Contributing" section or CONTRIBUTING.md) or a live deployment link.';
+
+    if (textMentionsContribFile) {
+      observationText = 'README references CONTRIBUTING.md but no corresponding file exists in the repository tree';
+      explanationText = 'README text mentions CONTRIBUTING.md, but no actual CONTRIBUTING.md or .github/CONTRIBUTING.md file was found in the repository tree, and no dedicated contribution section or live demo URL was detected.';
+    } else if (hasDevSetupHeading) {
+      observationText = 'Generic development/setup commands detected, but no formal contribution guidelines found';
+      explanationText = 'README contains development setup commands, but lacks formal contribution guidelines (e.g., "Contributing" section or CONTRIBUTING.md) and live deployment links.';
+    }
+
     findings.push({
       id: 'DOC-06-warning',
       ruleId: 'DOC-06',
@@ -549,11 +715,11 @@ export function analyzeReadme(
       severity: 'low',
       scoreEffect: 0,
       maxEffect: doc06Rule.basePoints,
-      explanation: 'README does not reference a live demonstration URL or contributing guidelines.',
+      explanation: explanationText,
       recommendation: 'Include a link to a live deployed demo or a CONTRIBUTING.md guide.',
       evidence: {
         label: 'Observation',
-        value: 'Neither contribution headers nor standard demo hosting URLs found',
+        value: observationText,
         sourceUrl: readmeUrl,
       },
     });
