@@ -20,7 +20,12 @@ export function runAllAnalyzers(raw: RawAnalysisData): AnalysisOutcome {
   const allPaths = treeItems.length > 0 ? treeItems.map((i) => i.path) : rootFiles;
 
   // 1. Run each category analyzer
-  const docFindings = analyzeReadme(raw.readme, repo, allPaths);
+  const docFindings = analyzeReadme(
+    raw.readme,
+    repo,
+    allPaths,
+    raw.manifestContents?.packageJson
+  );
   const licenseFindings = analyzeLicense(raw.license, repo, rootFiles);
   const workflowFindings = analyzeWorkflows(raw.workflows, raw.workflowRuns, repo, raw.apiErrors);
   const testingFindings = analyzeTestingEvidence(raw, repo);

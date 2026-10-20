@@ -3,6 +3,7 @@
  */
 
 import { GitHubReadme, GitHubRepo } from '../types/github';
+import { PackageJsonManifest } from '../types/analysis';
 import { Finding } from '../types/scoring';
 import { SCORING_RULES } from '../config/scoringRules';
 
@@ -192,10 +193,125 @@ export function findLiveDemoUrl(repoHomepage?: string | null, readmeContent?: st
   return null;
 }
 
+/**
+ * Identifies likely web application projects through repository evidence:
+ * frontend framework dependencies, HTML entry points, and frontend source/configs.
+ */
+export function isLikelyWebApplication(
+  filePaths: string[] = [],
+  packageJson?: PackageJsonManifest | null
+): boolean {
+  if (packageJson) {
+    const deps = {
+      ...(packageJson.dependencies || {}),
+      ...(packageJson.devDependencies || {}),
+    };
+    const hasFrontendFramework = [
+      'react',
+      'react-dom',
+      'vue',
+      'svelte',
+      '@angular/core',
+      'next',
+      'nuxt',
+      'remix',
+      'astro',
+      'solid-js',
+      'vite',
+    ].some((pkg) => pkg in deps);
+    if (hasFrontendFramework) return true;
+  }
+
+  const normalized = filePaths.map((p) => p.replace(/\\/g, '/'));
+  const hasHtmlEntry = normalized.some((p) => /(?:^|\/)index\.html$/i.test(p));
+  const hasFrontendConfig = normalized.some((p) =>
+    /(?:^|\/)(?:vite\.config|next\.config|nuxt\.config|webpack\.config|tailwind\.config|postcss\.config)\.[a-z0-9]+$/i.test(p)
+  );
+  const hasFrontendSource = normalized.some((p) =>
+    /(?:^|\/)src\/(?:App|main|index)\.(?:tsx|jsx|vue|svelte|html)$/i.test(p)
+  );
+
+  return (hasHtmlEntry && (hasFrontendConfig || hasFrontendSource)) || (hasFrontendConfig && hasFrontendSource);
+}
+
+/**
+ * Extracts relative image references from Markdown or HTML image tags.
+ */
+export function extractImageReferences(markdownText: string): string[] {
+  if (!markdownText) return [];
+  const images: string[] = [];
+  const mdImageRegex = /!\[([^\]]*)\]\(([^)\s]+)(?:\s+["'][^"']*["'])?\)/g;
+  const htmlImageRegex = /<img[^>]+src=["']([^"']+)["'][^>]*>/gi;
+
+  let match: RegExpExecArray | null;
+  while ((match = mdImageRegex.exec(markdownText)) !== null) {
+    images.push(match[2].trim());
+  }
+  while ((match = htmlImageRegex.exec(markdownText)) !== null) {
+    images.push(match[1].trim());
+  }
+  return images;
+}
+
+/**
+ * Verifies whether a referenced repository image file exists in the scanned repository tree.
+ */
+export function verifyRepositoryImagePath(imageRef: string, filePaths: string[]): string | null {
+  if (/^https?:\/\//i.test(imageRef)) {
+    return null;
+  }
+  const clean = imageRef
+    .replace(/\\/g, '/')
+    .replace(/^\.\//, '')
+    .replace(/^\//, '')
+    .split(/[?#]/)[0]
+    .toLowerCase();
+
+  const normalizedPaths = filePaths.map((p) => p.replace(/\\/g, '/'));
+  const matched = normalizedPaths.find((p) => {
+    const pLower = p.toLowerCase();
+    return pLower === clean || pLower.endsWith('/' + clean);
+  });
+
+  return matched || null;
+}
+
+/**
+ * Extracts substantive user workflow steps from a section (filtering out code blocks and setup/test commands).
+ */
+export function extractWorkflowSteps(sectionText: string): string[] {
+  if (!sectionText) return [];
+  const lines = sectionText.split('\n');
+  const steps: string[] = [];
+  let inCode = false;
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (line.startsWith('```') || line.startsWith('~~~')) {
+      inCode = !inCode;
+      continue;
+    }
+    if (inCode) continue;
+
+    // Numbered item (1. ...) or bullet list item (- ..., * ...)
+    const stepMatch = line.match(/^(?:(?:\d+\.|\*|-)\s+)(.+)$/);
+    if (stepMatch) {
+      const stepText = stepMatch[1].trim();
+      // Exclude setup/test commands formatted as list items (e.g. "1. npm install", "- npm test")
+      if (stepText.length >= 10 && !isSetupOrTestCommandLine(stepText)) {
+        steps.push(stepText);
+      }
+    }
+  }
+
+  return steps;
+}
+
 export function analyzeReadme(
   readme: GitHubReadme | null,
   repo: GitHubRepo,
-  filePaths: string[] = []
+  filePaths: string[] = [],
+  packageJson?: PackageJsonManifest | null
 ): Finding[] {
   const findings: Finding[] = [];
   const content = readme?.decodedContent || '';
@@ -472,7 +588,7 @@ export function analyzeReadme(
     });
   }
 
-  // DOC-04: Usage Examples / Quick Start
+  // DOC-04: Usage Examples / Quick Start (Libraries & Web Applications)
   const doc04Rule = SCORING_RULES['DOC-04'];
   const usagePatterns: (string | RegExp)[] = [
     'usage',
@@ -495,22 +611,67 @@ export function analyzeReadme(
     matchesHeadingPattern(h, usagePatterns)
   );
 
+  const isWebApp = isLikelyWebApplication(filePaths, packageJson);
+
   let hasValidUsageSectionWithCode = false;
   let matchedUsageWithCodeHeading: MarkdownHeading | null = null;
   let usageSectionHasOnlySetupOrTest = false;
+
+  let hasValidWebAppWorkflow = false;
+  let matchedWebAppHeading: MarkdownHeading | null = null;
+  let matchedWorkflowStepsCount = 0;
+  let verifiedWebAppImages: string[] = [];
+  let hasUnverifiedScreenshotRef = false;
+  let unverifiedHeading: MarkdownHeading | null = null;
+
+  const allImages = extractImageReferences(content);
+  const verifiedAllImages = allImages
+    .map((img) => verifyRepositoryImagePath(img, filePaths))
+    .filter((p): p is string => p !== null);
 
   for (const h of matchedUsageHeadings) {
     const sectionText = getSectionContent(h, headings, content);
     const codeBlocks = extractFencedCodeBlocks(sectionText);
 
+    // 1. Check code-based usage (libraries, APIs, CLI tools)
     if (codeBlocks.length > 0) {
       const hasMeaningful = codeBlocks.some((b) => isMeaningfulUsageCode(b));
       if (hasMeaningful) {
         hasValidUsageSectionWithCode = true;
         matchedUsageWithCodeHeading = h;
-        break;
       } else {
         usageSectionHasOnlySetupOrTest = true;
+      }
+    }
+
+    // 2. Check web-application workflow documentation
+    if (isWebApp) {
+      const workflowSteps = extractWorkflowSteps(sectionText);
+      const sectionImages = extractImageReferences(sectionText);
+      const verifiedSectionImages = sectionImages
+        .map((img) => verifyRepositoryImagePath(img, filePaths))
+        .filter((p): p is string => p !== null);
+
+      const hasAnyUnverifiedImageRef = sectionImages.length > 0 && verifiedSectionImages.length === 0;
+
+      if (workflowSteps.length >= 3) {
+        if (verifiedSectionImages.length > 0) {
+          hasValidWebAppWorkflow = true;
+          matchedWebAppHeading = h;
+          matchedWorkflowStepsCount = workflowSteps.length;
+          verifiedWebAppImages = verifiedSectionImages;
+        } else if (verifiedAllImages.length > 0) {
+          hasValidWebAppWorkflow = true;
+          matchedWebAppHeading = h;
+          matchedWorkflowStepsCount = workflowSteps.length;
+          verifiedWebAppImages = verifiedAllImages;
+        } else if (hasAnyUnverifiedImageRef || (allImages.length > 0 && verifiedAllImages.length === 0)) {
+          hasUnverifiedScreenshotRef = true;
+          unverifiedHeading = h;
+        }
+      } else if (hasAnyUnverifiedImageRef || (sectionImages.length > 0 && verifiedSectionImages.length === 0)) {
+        hasUnverifiedScreenshotRef = true;
+        unverifiedHeading = h;
       }
     }
   }
@@ -525,36 +686,89 @@ export function analyzeReadme(
       severity: 'info',
       scoreEffect: doc04Rule.basePoints,
       maxEffect: doc04Rule.basePoints,
-      explanation: `README provides dedicated usage instructions under section "${matchedUsageWithCodeHeading.rawText}" supported by relevant code examples.`,
+      explanation: `README provides dedicated usage instructions under section "${matchedUsageWithCodeHeading.rawText}" supported by relevant executable code examples.`,
       evidence: {
         label: 'Usage Section',
-        value: `"${matchedUsageWithCodeHeading.rawText}" with code examples`,
+        value: `"${matchedUsageWithCodeHeading.rawText}" with executable code examples`,
+        sourceUrl: readmeUrl,
+      },
+    });
+  } else if (hasValidWebAppWorkflow && matchedWebAppHeading) {
+    const imgSample = verifiedWebAppImages.slice(0, 3).join(', ');
+    findings.push({
+      id: 'DOC-04-pass',
+      ruleId: 'DOC-04',
+      category: 'documentation',
+      title: 'Usage Workflow & UI Examples Detected',
+      status: 'pass',
+      severity: 'info',
+      scoreEffect: doc04Rule.basePoints,
+      maxEffect: doc04Rule.basePoints,
+      explanation: `README documents web-application user workflow under section "${matchedWebAppHeading.rawText}" (${matchedWorkflowStepsCount} actionable steps) supported by verified repository screenshots (${imgSample}).`,
+      evidence: {
+        label: 'Usage Workflow',
+        value: `"${matchedWebAppHeading.rawText}" with ${matchedWorkflowStepsCount} workflow steps and verified screenshots (${imgSample})`,
         sourceUrl: readmeUrl,
       },
     });
   } else if (matchedUsageHeadings.length > 0) {
-    const firstUsageHeading = matchedUsageHeadings[0];
-    const reason = usageSectionHasOnlySetupOrTest
-      ? `contains setup or test commands rather than concrete usage examples`
-      : `lacks executable code blocks or runnable examples`;
+    const firstUsageHeading = unverifiedHeading || matchedUsageHeadings[0];
 
-    findings.push({
-      id: 'DOC-04-warning',
-      ruleId: 'DOC-04',
-      category: 'documentation',
-      title: 'Partial Usage Examples Detected',
-      status: 'warning',
-      severity: 'low',
-      scoreEffect: 1,
-      maxEffect: doc04Rule.basePoints,
-      explanation: `Usage section "${firstUsageHeading.rawText}" is present in the README, but ${reason}.`,
-      recommendation: 'Include practical, copy-pasteable usage examples showing how to interact with the project.',
-      evidence: {
-        label: 'Observation',
-        value: `Usage section "${firstUsageHeading.rawText}" lacks executable usage examples`,
-        sourceUrl: readmeUrl,
-      },
-    });
+    if (hasUnverifiedScreenshotRef) {
+      findings.push({
+        id: 'DOC-04-warning',
+        ruleId: 'DOC-04',
+        category: 'documentation',
+        title: 'Partial Usage Guide Detected (Unverified Screenshot References)',
+        status: 'warning',
+        severity: 'low',
+        scoreEffect: 1,
+        maxEffect: doc04Rule.basePoints,
+        explanation: `Usage guide was detected under "${firstUsageHeading.rawText}", but referenced screenshot image(s) could not be verified in the repository tree.`,
+        recommendation: 'Ensure referenced screenshot images exist in the repository tree (e.g. under docs/screenshots/).',
+        evidence: {
+          label: 'Observation',
+          value: 'Referenced screenshot image(s) not found in repository tree',
+          sourceUrl: readmeUrl,
+        },
+      });
+    } else if (usageSectionHasOnlySetupOrTest) {
+      findings.push({
+        id: 'DOC-04-warning',
+        ruleId: 'DOC-04',
+        category: 'documentation',
+        title: 'Partial Usage Examples Detected',
+        status: 'warning',
+        severity: 'low',
+        scoreEffect: 1,
+        maxEffect: doc04Rule.basePoints,
+        explanation: `Usage section "${firstUsageHeading.rawText}" is present in the README, but contains setup or test commands rather than concrete usage examples.`,
+        recommendation: 'Include practical usage examples or a documented user workflow showing how to use the project.',
+        evidence: {
+          label: 'Observation',
+          value: `Usage section "${firstUsageHeading.rawText}" contains setup or test commands rather than usage examples`,
+          sourceUrl: readmeUrl,
+        },
+      });
+    } else {
+      findings.push({
+        id: 'DOC-04-warning',
+        ruleId: 'DOC-04',
+        category: 'documentation',
+        title: 'Partial Usage Examples Detected',
+        status: 'warning',
+        severity: 'low',
+        scoreEffect: 1,
+        maxEffect: doc04Rule.basePoints,
+        explanation: `Usage section "${firstUsageHeading.rawText}" is present in the README, but lacks executable code blocks, runnable examples, or documented user workflow steps.`,
+        recommendation: 'Include practical usage examples or numbered workflow steps showing how to use the project.',
+        evidence: {
+          label: 'Observation',
+          value: `Usage section "${firstUsageHeading.rawText}" lacks executable usage examples or verified workflow steps`,
+          sourceUrl: readmeUrl,
+        },
+      });
+    }
   } else {
     findings.push({
       id: 'DOC-04-not-detected',
@@ -566,7 +780,7 @@ export function analyzeReadme(
       scoreEffect: 0,
       maxEffect: doc04Rule.basePoints,
       explanation: 'No dedicated usage section (e.g., "Usage", "How to Use", "Examples", "CLI Usage", "Quick Start") was found in the README.',
-      recommendation: 'Add a "Usage" section demonstrating the project with concise code examples.',
+      recommendation: 'Add a "Usage" or "How to Use" section demonstrating the project with concise examples or workflow steps.',
       evidence: {
         label: 'Observation',
         value: 'No dedicated usage section or code examples found in README',

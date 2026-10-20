@@ -379,6 +379,222 @@ npm test
         expect(doc06Missing?.scoreEffect).toBe(0);
       });
     });
+
+    describe('DOC-04 Web Application & Library Usage Rules (Phase 2)', () => {
+      const baseRepo: typeof mockRepoData = {
+        ...mockRepoData,
+        homepage: null,
+      };
+
+      const makeReadme = (md: string) => ({
+        name: 'README.md',
+        path: 'README.md',
+        sha: 'mock-sha',
+        size: md.length,
+        url: 'https://api.github.com/repos/acme/sample/readme',
+        html_url: 'https://github.com/acme/sample#readme',
+        download_url: '',
+        content: btoa(md),
+        encoding: 'base64',
+        decodedContent: md,
+      });
+
+      const webAppPackageJson = {
+        name: 'my-web-app',
+        dependencies: {
+          react: '^18.3.1',
+          'react-dom': '^18.3.1',
+        },
+        devDependencies: {
+          vite: '^6.0.0',
+        },
+      };
+
+      const webAppFilePaths = [
+        'README.md',
+        'package.json',
+        'index.html',
+        'vite.config.ts',
+        'src/App.tsx',
+        'src/main.tsx',
+        'docs/screenshots/dashboard.png',
+      ];
+
+      it('1. should award full points for a web app with an explicit usage guide, workflow steps and existing screenshot', () => {
+        const md = `# RepoHealth Web Application
+
+## Overview
+A web-based GitHub repository health analyzer.
+
+## How to Use RepoHealth
+Follow these simple workflow steps to evaluate any public GitHub repository:
+1. Enter a valid public GitHub repository URL into the scan input.
+2. Click "Analyze Repository" and wait for real-time GitHub REST API collection.
+3. Switch between Balanced, Engineering, and Presentation scoring perspectives.
+4. Review category scores, verified findings, and prioritized recommendations.
+5. Export findings as JSON or use print/save to generate a PDF report.
+
+![Dashboard Screenshot](docs/screenshots/dashboard.png)
+`;
+        const findings = analyzeReadme(makeReadme(md), baseRepo, webAppFilePaths, webAppPackageJson);
+        const doc04 = findings.find((f) => f.ruleId === 'DOC-04');
+        expect(doc04?.status).toBe('pass');
+        expect(doc04?.scoreEffect).toBe(3);
+        expect(doc04?.title).toContain('Usage Workflow');
+        expect(doc04?.explanation).toContain('web-application user workflow');
+        expect(doc04?.evidence?.value).toContain('docs/screenshots/dashboard.png');
+      });
+
+      it('2. should return warning with partial score for a usage guide referencing a screenshot that does not exist in the tree', () => {
+        const md = `# Web App
+
+## How to Use
+1. Open the web interface in your browser.
+2. Paste the target project URL into the search box.
+3. Click submit and inspect the results dashboard.
+4. Export the resulting audit summary as a PDF.
+
+![Missing Screenshot](docs/screenshots/non-existent-image.png)
+`;
+        const findings = analyzeReadme(makeReadme(md), baseRepo, webAppFilePaths, webAppPackageJson);
+        const doc04 = findings.find((f) => f.ruleId === 'DOC-04');
+        expect(doc04?.status).toBe('warning');
+        expect(doc04?.scoreEffect).toBe(1);
+        expect(doc04?.title).toContain('Unverified Screenshot References');
+        expect(doc04?.explanation).toContain('could not be verified');
+      });
+
+      it('3. should NOT award full points to a web app with screenshots but no useful usage instructions', () => {
+        const mdNoUsage = `# Web App
+
+## Overview
+Some web application.
+
+## Screenshot Gallery
+![Dashboard Screenshot](docs/screenshots/dashboard.png)
+`;
+        const findingsNoUsage = analyzeReadme(makeReadme(mdNoUsage), baseRepo, webAppFilePaths, webAppPackageJson);
+        const doc04NoUsage = findingsNoUsage.find((f) => f.ruleId === 'DOC-04');
+        expect(doc04NoUsage?.status).toBe('not_detected');
+        expect(doc04NoUsage?.scoreEffect).toBe(0);
+
+        const mdVague = `# Web App
+
+## Usage
+Just open the website and click around.
+
+![Dashboard](docs/screenshots/dashboard.png)
+`;
+        const findingsVague = analyzeReadme(makeReadme(mdVague), baseRepo, webAppFilePaths, webAppPackageJson);
+        const doc04Vague = findingsVague.find((f) => f.ruleId === 'DOC-04');
+        expect(doc04Vague?.status).toBe('warning');
+        expect(doc04Vague?.scoreEffect).toBe(1);
+      });
+
+      it('4. should award full points to a library README with a valid usage heading and code examples', () => {
+        const libraryFilePaths = ['README.md', 'package.json', 'src/index.ts'];
+        const libraryPackageJson = {
+          name: 'math-library',
+          dependencies: {},
+        };
+        const md = `# Math Library
+
+## Usage
+Import and calculate:
+\`\`\`typescript
+import { add, multiply } from 'math-library';
+const sum = add(5, 10);
+console.log(multiply(sum, 2));
+\`\`\`
+`;
+        const findings = analyzeReadme(makeReadme(md), baseRepo, libraryFilePaths, libraryPackageJson);
+        const doc04 = findings.find((f) => f.ruleId === 'DOC-04');
+        expect(doc04?.status).toBe('pass');
+        expect(doc04?.scoreEffect).toBe(3);
+        expect(doc04?.title).toContain('Code Snippets');
+        expect(doc04?.explanation).toContain('executable code examples');
+      });
+
+      it('5. should return not_detected for a setup-only README with installation and test commands', () => {
+        const md = `# Tool
+
+## Installation
+\`\`\`bash
+npm install -g my-tool
+\`\`\`
+
+## Testing
+\`\`\`bash
+npm test
+\`\`\`
+`;
+        const findings = analyzeReadme(makeReadme(md), baseRepo, webAppFilePaths, webAppPackageJson);
+        const doc04 = findings.find((f) => f.ruleId === 'DOC-04');
+        expect(doc04?.status).toBe('not_detected');
+        expect(doc04?.scoreEffect).toBe(0);
+      });
+
+      it('6. should return not_detected when code blocks appear only in unrelated sections', () => {
+        const md = `# Project
+
+## Architecture Overview
+Here is how our data schema looks:
+\`\`\`json
+{
+  "status": "active",
+  "nodes": 4
+}
+\`\`\`
+`;
+        const findings = analyzeReadme(makeReadme(md), baseRepo, webAppFilePaths, webAppPackageJson);
+        const doc04 = findings.find((f) => f.ruleId === 'DOC-04');
+        expect(doc04?.status).toBe('not_detected');
+        expect(doc04?.scoreEffect).toBe(0);
+      });
+
+      it('7. should return not_detected for missing README and incomplete tree evidence', () => {
+        const findings = analyzeReadme(null, baseRepo, []);
+        const doc04 = findings.find((f) => f.ruleId === 'DOC-04');
+        expect(doc04?.status).toBe('not_detected');
+        expect(doc04?.scoreEffect).toBe(0);
+      });
+
+      it('8. should award full points for RepoHealth web app with workflow steps and verified screenshots', () => {
+        const actualRepoFilePaths = [
+          'README.md',
+          'package.json',
+          'index.html',
+          'vite.config.ts',
+          'src/App.tsx',
+          'docs/screenshots/homepage.png',
+          'docs/screenshots/report-overview.png',
+          'docs/screenshots/report-findings.png',
+        ];
+        const md = `# RepoHealth
+## 1. Project Purpose
+RepoHealth evaluates GitHub repositories.
+
+## 2. Screenshot Gallery
+![Homepage](docs/screenshots/homepage.png)
+![Overview](docs/screenshots/report-overview.png)
+![Findings](docs/screenshots/report-findings.png)
+
+## 3. How to Use RepoHealth
+1. Enter a public GitHub repository URL into the scanner input.
+2. Start the scan and wait for actual GitHub API results across all stages.
+3. Switch between Balanced, Engineering Evidence, and Presentation scoring perspectives.
+4. Inspect category scores, evidence-backed findings, and recommendations.
+5. Export the findings as JSON or print/save the report as PDF.
+`;
+        const findings = analyzeReadme(makeReadme(md), baseRepo, actualRepoFilePaths, webAppPackageJson);
+        const doc04 = findings.find((f) => f.ruleId === 'DOC-04');
+        expect(doc04?.status).toBe('pass');
+        expect(doc04?.scoreEffect).toBe(3);
+        expect(doc04?.title).toContain('Usage Workflow');
+        expect(doc04?.explanation).toContain('web-application user workflow');
+        expect(doc04?.evidence?.value).toContain('docs/screenshots/homepage.png');
+      });
+    });
   });
 
   describe('License Analyzer', () => {
