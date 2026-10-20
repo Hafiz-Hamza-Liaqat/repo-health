@@ -111,7 +111,7 @@ export const ApiSettingsModal: React.FC<ApiSettingsModalProps> = ({
           <div className="flex items-start gap-2 p-3 bg-slate-800/50 rounded-lg text-xs text-slate-400">
             <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
             <span>
-              Your token is stored exclusively in this browser's session memory. It is never logged, sent to external servers, or persisted across browser restarts.
+              Your token is held exclusively in JavaScript memory for the active session. It is never written to disk, localStorage, or sessionStorage, never transmitted to third parties, and is discarded if you refresh or close this tab.
             </span>
           </div>
 

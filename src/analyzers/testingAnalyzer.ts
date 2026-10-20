@@ -24,10 +24,16 @@ export function analyzeTestingEvidence(
   const goMod = raw.manifestContents?.goMod || '';
   const rootFiles = raw.rootFiles || [];
 
-  // Check test frameworks
+  // Tracked file paths across repository (from recursive Git Tree or rootFiles fallback)
+  const allPaths: string[] = raw.tree && raw.tree.items.length > 0
+    ? raw.tree.items.map((i) => i.path)
+    : rootFiles;
+
+  const isTreeTruncated = !!raw.tree?.isTruncated;
+
+  // Check test frameworks in dependencies
   const detectedFrameworks: string[] = [];
 
-  // Node packages
   if (pkg) {
     const deps: Record<string, string | undefined> = {
       ...(pkg.dependencies || {}),
@@ -56,13 +62,12 @@ export function analyzeTestingEvidence(
 
   // Go
   if (goMod.length > 0 || repo.language === 'Go') {
-    // Go has built-in testing package
     detectedFrameworks.push('Go testing');
   }
 
-  // Check config files in root
-  const testConfigFiles = rootFiles.filter((f) =>
-    /^(?:vitest\.config|jest\.config|playwright\.config|cypress\.config|\.mocharc|pytest\.ini|setup\.cfg|tox\.ini)/i.test(f)
+  // Check config files across tracked paths (root or nested)
+  const testConfigFiles = allPaths.filter((path) =>
+    /(?:^|\/)(?:vitest\.config|jest\.config|playwright\.config|cypress\.config|\.mocharc|pytest\.ini|setup\.cfg|tox\.ini)(?:\.[a-zA-Z0-9]+)?$/i.test(path)
   );
 
   // TST-01: Framework detection
@@ -156,55 +161,99 @@ export function analyzeTestingEvidence(
     });
   }
 
-  // TST-03: Dedicated test directory or test files
-  const testDirectory = rootFiles.find((f) =>
-    /^(?:tests?|__tests__|spec|specs)$/i.test(f)
-  );
-  const testFilesInRoot = rootFiles.filter((f) =>
-    /\.(?:test|spec)\.[a-zA-Z0-9]+$/i.test(f)
+  // TST-03: Recursive Test Files & Test Directory Discovery
+  // Recognize test files across the entire directory tree
+  const testFileRegex = /(?:^|\/)[^/]+\.(?:test|spec)\.[a-zA-Z0-9]+$/i;
+  const pyTestRegex = /(?:^|\/)(?:test_[^/]+|[^/]+_test)\.py$/i;
+  const goTestRegex = /(?:^|\/)[^/]+_test\.go$/i;
+  const javaTestRegex = /(?:^|\/)[^/]+(?:Test|Tests|TestCase)\.java$/i;
+  const rustTestRegex = /(?:^|\/)tests\/[^/]+\.rs$/i;
+
+  const testFiles = allPaths.filter((path) =>
+    testFileRegex.test(path) ||
+    pyTestRegex.test(path) ||
+    goTestRegex.test(path) ||
+    javaTestRegex.test(path) ||
+    rustTestRegex.test(path)
   );
 
-  if (testDirectory || testFilesInRoot.length > 0) {
-    const target = testDirectory ? `directory "${testDirectory}/"` : `root spec file "${testFilesInRoot[0]}"`;
+  // Recognize test directories at any depth (e.g. "tests", "src/test", "e2e", "spec")
+  const testDirectoryPatterns = /(?:^|\/)(?:tests?|__tests__|spec|specs|e2e)(?:\/|$)/i;
+  const testDirectories = Array.from(
+    new Set(
+      allPaths
+        .filter((path) => testDirectoryPatterns.test(path))
+        .map((path) => {
+          const parts = path.split('/');
+          const idx = parts.findIndex((p) => /^(?:tests?|__tests__|spec|specs|e2e)$/i.test(p));
+          return parts.slice(0, idx + 1).join('/');
+        })
+    )
+  );
+
+  const hasRootTestDirectory = rootFiles.some((f) =>
+    /^(?:tests?|__tests__|spec|specs|e2e)$/i.test(f)
+  );
+
+  if (testFiles.length > 0 || testDirectories.length > 0) {
+    const sampleFiles = testFiles.slice(0, 3).join(', ');
+    const directoryNote = testDirectories.length > 0
+      ? `in director${testDirectories.length > 1 ? 'ies' : 'y'} [${testDirectories.slice(0, 3).join(', ')}]`
+      : 'co-located in source tree';
+
     findings.push({
       id: 'TST-03-pass',
       ruleId: 'TST-03',
       category: 'testing',
-      title: `Dedicated Test Directory Found (${testDirectory || 'specs'})`,
+      title: `Test Suite Structure & Spec Files Detected (${testFiles.length} file${testFiles.length === 1 ? '' : 's'})`,
       status: 'pass',
       severity: 'info',
       scoreEffect: tst03Rule.basePoints,
       maxEffect: tst03Rule.basePoints,
-      explanation: `Identified test suite container: ${target}.`,
+      explanation: `Identified ${testFiles.length} automated test spec file(s) ${directoryNote}.${!hasRootTestDirectory && testDirectories.length > 0 ? ' (Structured in nested/subsystem directories).' : ''}`,
       evidence: {
-        label: 'Test Structure',
-        value: testDirectory ? `/${testDirectory}` : testFilesInRoot.join(', '),
-        sourcePath: testDirectory || testFilesInRoot[0],
+        label: 'Test Files',
+        value: sampleFiles || testDirectories.join(', '),
+        sourcePath: testFiles[0] || testDirectories[0],
       },
     });
+  } else if (isTreeTruncated) {
+    // Tree response was truncated by GitHub API (>100,000 items)
+    findings.push({
+      id: 'TST-03-truncated',
+      ruleId: 'TST-03',
+      category: 'testing',
+      title: 'Test Files Indeterminate (Truncated Git Tree)',
+      status: 'unknown',
+      severity: 'medium',
+      scoreEffect: 2,
+      maxEffect: tst03Rule.basePoints,
+      explanation: 'GitHub Git Trees API response was truncated due to repository size (>100,000 tracked files). Test files could not be confirmed within the returned tree window.',
+      recommendation: 'Ensure test runner configuration and test directories are documented in README.',
+    });
   } else {
+    // Verified complete tree without any test files
     findings.push({
       id: 'TST-03-not-detected',
       ruleId: 'TST-03',
       category: 'testing',
-      title: 'No Dedicated Test Directory Detected in Root',
-      status: 'warning',
-      severity: 'medium',
-      scoreEffect: 1,
+      title: 'No Automated Test Files or Test Directories Detected',
+      status: 'not_detected',
+      severity: 'high',
+      scoreEffect: 0,
       maxEffect: tst03Rule.basePoints,
-      explanation: 'No top-level "test/", "tests/", "__tests__/", or "spec/" directory was found in the repository root.',
-      recommendation: 'Group automated tests inside a structured "test/" or "tests/" directory or co-locate *.test.ts files.',
+      explanation: 'No test spec files (*.test.ts, test_*.py, etc.) or test directories (test/, __tests__/, spec/) were found across repository tree.',
+      recommendation: 'Add automated tests organized in a test directory or co-located with source files (e.g. *.test.ts).',
     });
   }
 
   // TST-04: Test execution in CI
-  // Check if any workflow mentions test/vitest/jest/pytest/cargo test
   const workflows: GitHubWorkflow[] = raw.workflows || [];
   const testWorkflows = workflows.filter((w) =>
     /(?:test|ci|check|build|qa|verify)/i.test(w.name)
   );
 
-  if (testWorkflows.length > 0 && detectedFrameworks.length > 0) {
+  if (testWorkflows.length > 0 && (detectedFrameworks.length > 0 || testFiles.length > 0)) {
     findings.push({
       id: 'TST-04-pass',
       ruleId: 'TST-04',

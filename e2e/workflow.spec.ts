@@ -188,6 +188,26 @@ test.describe('RepoHealth End-to-End User Journey', () => {
       });
     });
 
+    await page.route('https://api.github.com/repos/mock-org/mock-repo/git/trees*', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          sha: 'main-tree-sha',
+          url: 'https://api.github.com/repos/mock-org/mock-repo/git/trees/main',
+          tree: [
+            { path: 'README.md', mode: '100644', type: 'blob', sha: '1', size: 100 },
+            { path: 'LICENSE', mode: '100644', type: 'blob', sha: '2', size: 100 },
+            { path: 'package.json', mode: '100644', type: 'blob', sha: '3', size: 100 },
+            { path: 'src/index.ts', mode: '100644', type: 'blob', sha: '4', size: 200 },
+            { path: 'src/components/App.tsx', mode: '100644', type: 'blob', sha: '5', size: 300 },
+            { path: 'src/components/App.test.tsx', mode: '100644', type: 'blob', sha: '6', size: 400 },
+          ],
+          truncated: false,
+        }),
+      });
+    });
+
     await page.route('https://api.github.com/repos/mock-org/mock-repo/contents/package.json', async (route) => {
       const pkg = JSON.stringify({
         name: 'mock-repo',

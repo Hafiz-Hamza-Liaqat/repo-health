@@ -8,8 +8,8 @@ import { AssessmentCategoryKey, ScoringPerspectiveKey } from '../types/scoring';
 import { calculateAssessmentScore } from './scoringEngine';
 import { generateRecommendations } from './recommendations';
 
-export const ANALYZER_VERSION = '1.0.0';
-export const REPORT_SCHEMA_VERSION = 'https://repohealth.dev/schemas/v1/report.json';
+export const ANALYZER_VERSION = '1.1.0';
+export const REPORT_SCHEMA_VERSION = 'https://repohealth.dev/schemas/v1.1/report.json';
 
 export function generateReport(
   outcome: AnalysisOutcome,
@@ -26,7 +26,7 @@ export function generateReport(
   const recommendations = generateRecommendations(outcome.findings);
 
   return {
-    version: '1.0.0',
+    version: ANALYZER_VERSION,
     schemaVersion: REPORT_SCHEMA_VERSION,
     generatedAt: new Date().toISOString(),
     analyzerVersion: ANALYZER_VERSION,
@@ -49,6 +49,7 @@ export function generateReport(
         forks: repo.forks_count,
         openIssues: repo.open_issues_count,
         watchers: repo.watchers_count,
+        sizeKb: repo.size,
       },
       license: repo.license
         ? {
@@ -68,12 +69,8 @@ export function generateReport(
     technologies: outcome.technologies,
     provenance: outcome.provenance,
     dataCoverage: {
-      endpointsTotal: outcome.coverage.endpointsTotal,
-      endpointsSucceeded: outcome.coverage.endpointsSucceeded,
-      endpointsFailed: outcome.coverage.endpointsFailed,
-      coveragePercentage: outcome.coverage.percentage,
-      limitations: [...outcome.limitations, ...assessment.limitations],
-      failedEndpoints: outcome.raw.apiErrors.map((e) => e.endpoint),
+      ...outcome.coverage,
+      limitations: Array.from(new Set([...outcome.limitations, ...assessment.limitations])),
     },
     recommendations,
     notice: {

@@ -10,6 +10,8 @@ import {
   Tag,
   Info,
   Beaker,
+  Search,
+  HelpCircle,
 } from 'lucide-react';
 import { AssessmentCategoryKey, CategoryScore, Finding } from '../../types/scoring';
 import { Badge } from '../common/Badge';
@@ -37,6 +39,10 @@ export const CategoryCards: React.FC<CategoryCardsProps> = ({ categoryScores }) 
         return <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />;
       case 'issue':
         return <XCircle className="w-4 h-4 text-rose-400 shrink-0" />;
+      case 'not_detected':
+        return <Search className="w-4 h-4 text-slate-400 shrink-0" />;
+      case 'unknown':
+        return <HelpCircle className="w-4 h-4 text-purple-400 shrink-0" />;
       default:
         return <Info className="w-4 h-4 text-slate-400 shrink-0" />;
     }
@@ -71,19 +77,26 @@ export const CategoryCards: React.FC<CategoryCardsProps> = ({ categoryScores }) 
         </div>
 
         {/* Filter by status */}
-        <div className="flex items-center gap-1.5 text-xs">
+        <div className="flex flex-wrap items-center gap-1.5 text-xs">
           <span className="text-slate-500 mr-1">Status:</span>
-          {(['all', 'issue', 'warning', 'pass'] as const).map((s) => (
+          {[
+            { id: 'all', label: 'All' },
+            { id: 'pass', label: 'Pass' },
+            { id: 'warning', label: 'Warning' },
+            { id: 'issue', label: 'Issue' },
+            { id: 'not_detected', label: 'Not Detected' },
+            { id: 'unknown', label: 'Unknown' },
+          ].map(({ id, label }) => (
             <button
-              key={s}
-              onClick={() => setFilterStatus(s)}
-              className={`px-2.5 py-1 rounded-md capitalize font-medium transition-colors ${
-                filterStatus === s
+              key={id}
+              onClick={() => setFilterStatus(id)}
+              className={`px-2.5 py-1 rounded-md font-medium transition-colors ${
+                filterStatus === id
                   ? 'bg-slate-700 text-white'
                   : 'bg-slate-950 text-slate-400 hover:text-slate-200'
               }`}
             >
-              {s}
+              {label}
             </button>
           ))}
         </div>

@@ -9,13 +9,14 @@ describe('Report Generator and Export', () => {
     const outcome = runAllAnalyzers(mockRawAnalysisData);
     const report = generateReport(outcome, 'balanced');
 
-    expect(report.version).toBe('1.0.0');
+    expect(report.version).toBe('1.1.0');
     expect(report.repository.fullName).toBe('acme-corp/sample-project');
     expect(report.scoring.activePerspective).toBe('balanced');
     expect(report.scoring.assessment.totalScore).toBeGreaterThan(70);
     expect(report.findings.length).toBeGreaterThan(0);
     expect(report.technologies.length).toBeGreaterThan(0);
-    expect(report.dataCoverage.coveragePercentage).toBe(100);
+    expect(report.dataCoverage.endpointResponseLabel).toBe('10/10');
+    expect(report.dataCoverage.treeStatus).toBe('complete');
     expect(report.notice.disclaimer).toBeDefined();
   });
 
@@ -26,7 +27,7 @@ describe('Report Generator and Export', () => {
     const jsonString = JSON.stringify(report);
     const parsed = JSON.parse(jsonString);
 
-    expect(parsed.version).toBe('1.0.0');
+    expect(parsed.version).toBe('1.1.0');
     expect(parsed.scoring.activePerspective).toBe('engineering');
     expect(parsed.repository.name).toBe('sample-project');
   });

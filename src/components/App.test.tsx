@@ -60,9 +60,9 @@ describe('App Integration', () => {
     });
 
     // Score gauge and perspective selector must be present
-    expect(screen.getByText('Repository Health Score')).toBeInTheDocument();
-    expect(screen.getByText('Balanced Repository Quality')).toBeInTheDocument();
-    expect(screen.getByText('Engineering Evidence')).toBeInTheDocument();
+    expect(screen.getAllByText('Repository Health Score').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Balanced Repository Quality').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Engineering Evidence').length).toBeGreaterThan(0);
     expect(screen.getByText('Export JSON')).toBeInTheDocument();
     expect(screen.getByText('Print / Save as PDF')).toBeInTheDocument();
   });
@@ -117,5 +117,33 @@ describe('App Integration', () => {
         screen.getByText(/Resource not found or private repository/i)
       ).toBeInTheDocument();
     });
+  });
+
+  it('renders all 5 finding status badges in ScoreOverview reconciling to total findings', async () => {
+    vi.spyOn(githubApi, 'fetchCompleteRepositoryData').mockResolvedValue({
+      data: mockRawAnalysisData,
+      errors: [],
+    });
+
+    render(<App />);
+
+    const input = screen.getByPlaceholderText(/Paste public GitHub repository URL/i);
+    const submitBtn = screen.getByRole('button', { name: /Analyze/i });
+
+    await act(async () => {
+      fireEvent.change(input, { target: { value: 'https://github.com/acme-corp/sample-project' } });
+      fireEvent.click(submitBtn);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('acme-corp/sample-project')).toBeInTheDocument();
+    });
+
+    // Score overview status badges: Pass, Warning, Issue, Not Detected, Unknown
+    expect(screen.getByText(/\d+\s+Pass/)).toBeInTheDocument();
+    expect(screen.getByText(/\d+\s+Warning/)).toBeInTheDocument();
+    expect(screen.getByText(/\d+\s+Issue/)).toBeInTheDocument();
+    expect(screen.getByText(/\d+\s+Not Detected/)).toBeInTheDocument();
+    expect(screen.getByText(/\d+\s+Unknown/)).toBeInTheDocument();
   });
 });

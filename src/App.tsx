@@ -135,111 +135,113 @@ export function App() {
       />
 
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
-        {/* Hero section */}
-        {!report && (
-          <div className="text-center max-w-3xl mx-auto space-y-3 pt-6 pb-2">
-            <h1 className="text-3xl sm:text-4xl md:text-5xl font-extrabold tracking-tight text-white">
-              Evaluate code. <span className="text-emerald-400">Verify evidence.</span>
-            </h1>
-            <p className="text-base sm:text-lg text-slate-400 max-w-2xl mx-auto leading-relaxed">
-              Transparent, evidence-based health assessments for public GitHub repositories.
-              Analyze documentation, tests, CI/CD, releases, and software practices for hiring decisions.
-            </p>
-          </div>
-        )}
+        <div className="interactive-dashboard no-print space-y-8">
+          {/* Hero section */}
+          {!report && (
+            <div className="text-center max-w-3xl mx-auto space-y-3 pt-6 pb-2">
+              <h1 className="text-3xl sm:text-4xl md:text-5xl font-extrabold tracking-tight text-white">
+                Evaluate code. <span className="text-emerald-400">Verify evidence.</span>
+              </h1>
+              <p className="text-base sm:text-lg text-slate-400 max-w-2xl mx-auto leading-relaxed">
+                Transparent, evidence-based health assessments for public GitHub repositories.
+                Analyze documentation, tests, CI/CD, releases, and software practices for hiring decisions.
+              </p>
+            </div>
+          )}
 
-        {/* Scan Input Form (Hidden during active scan if results present) */}
-        {(!report || isLoading) && (
-          <ScanForm
-            onScan={(owner, repo) => executeScan(owner, repo)}
-            isLoading={isLoading}
-            initialValue={activeRepo ? `${activeRepo.owner}/${activeRepo.repo}` : ''}
-          />
-        )}
+          {/* Scan Input Form (Hidden during active scan if results present) */}
+          {(!report || isLoading) && (
+            <ScanForm
+              onScan={(owner, repo) => executeScan(owner, repo)}
+              isLoading={isLoading}
+              initialValue={activeRepo ? `${activeRepo.owner}/${activeRepo.repo}` : ''}
+            />
+          )}
 
-        {/* Live Step-by-Step Progress */}
-        {isLoading && (
-          <ScanProgress
-            currentStage={progressStage}
-            stageDetail={progressDetail}
-          />
-        )}
+          {/* Live Step-by-Step Progress */}
+          {isLoading && (
+            <ScanProgress
+              currentStage={progressStage}
+              stageDetail={progressDetail}
+            />
+          )}
 
-        {/* Error Alert */}
-        {errorMsg && !isLoading && (
-          <div className="max-w-2xl mx-auto p-5 bg-rose-950/60 border border-rose-800 rounded-xl shadow-lg space-y-3 animate-fadeIn">
-            <div className="flex items-start gap-3 text-rose-300">
-              <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
-              <div className="space-y-1">
-                <h4 className="text-sm font-bold text-white">Analysis Could Not Complete</h4>
-                <p className="text-xs text-rose-200 leading-relaxed">{errorMsg}</p>
+          {/* Error Alert */}
+          {errorMsg && !isLoading && (
+            <div className="max-w-2xl mx-auto p-5 bg-rose-950/60 border border-rose-800 rounded-xl shadow-lg space-y-3 animate-fadeIn">
+              <div className="flex items-start gap-3 text-rose-300">
+                <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  <h4 className="text-sm font-bold text-white">Analysis Could Not Complete</h4>
+                  <p className="text-xs text-rose-200 leading-relaxed">{errorMsg}</p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 pt-2 border-t border-rose-900/60 text-xs">
+                <button
+                  type="button"
+                  onClick={() => handleRescan()}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium text-white bg-rose-700 hover:bg-rose-600 transition-colors"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span>Try Again</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsSettingsOpen(true)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-rose-300 hover:text-white bg-rose-900/50 hover:bg-rose-900 border border-rose-800 transition-colors"
+                >
+                  <Key className="w-3.5 h-3.5" />
+                  <span>Configure API Token</span>
+                </button>
               </div>
             </div>
+          )}
 
-            <div className="flex items-center gap-2 pt-2 border-t border-rose-900/60 text-xs">
-              <button
-                type="button"
-                onClick={() => handleRescan()}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium text-white bg-rose-700 hover:bg-rose-600 transition-colors"
-              >
-                <RotateCcw className="w-3.5 h-3.5" />
-                <span>Try Again</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setIsSettingsOpen(true)}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-rose-300 hover:text-white bg-rose-900/50 hover:bg-rose-900 border border-rose-800 transition-colors"
-              >
-                <Key className="w-3.5 h-3.5" />
-                <span>Configure API Token</span>
-              </button>
+          {/* Report Dashboard */}
+          {report && !isLoading && (
+            <div className="space-y-8 animate-fadeIn">
+              {/* Action Toolbar */}
+              <ActionToolbar
+                report={report}
+                onRescan={handleRescan}
+                isLoading={isLoading}
+              />
+
+              {/* Dashboard Header */}
+              <DashboardHeader report={report} />
+
+              {/* Perspective Selector */}
+              <PerspectiveSelector
+                activeKey={activePerspective}
+                onChange={handlePerspectiveChange}
+              />
+
+              {/* Overall Score Overview */}
+              <ScoreOverview scoreResult={report.scoring.assessment} />
+
+              {/* Prioritized Recommendations */}
+              <RecommendationsList recommendations={report.recommendations} />
+
+              {/* Category Findings Cards */}
+              <CategoryCards categoryScores={report.scoring.assessment.categoryScores} />
+
+              {/* Technology Stack Badges */}
+              <TechnologyBadges technologies={report.technologies} />
+
+              {/* Provenance Signals */}
+              <ProvenanceOverview provenance={report.provenance} />
+
+              {/* Data Coverage & Limitations Notice */}
+              <LimitationsNotice
+                coverage={report.dataCoverage}
+                notice={report.notice}
+              />
             </div>
-          </div>
-        )}
+          )}
+        </div>
 
-        {/* Report Dashboard */}
-        {report && !isLoading && (
-          <div className="space-y-8 animate-fadeIn">
-            {/* Action Toolbar */}
-            <ActionToolbar
-              report={report}
-              onRescan={handleRescan}
-              isLoading={isLoading}
-            />
-
-            {/* Dashboard Header */}
-            <DashboardHeader report={report} />
-
-            {/* Perspective Selector */}
-            <PerspectiveSelector
-              activeKey={activePerspective}
-              onChange={handlePerspectiveChange}
-            />
-
-            {/* Overall Score Overview */}
-            <ScoreOverview scoreResult={report.scoring.assessment} />
-
-            {/* Prioritized Recommendations */}
-            <RecommendationsList recommendations={report.recommendations} />
-
-            {/* Category Findings Cards */}
-            <CategoryCards categoryScores={report.scoring.assessment.categoryScores} />
-
-            {/* Technology Stack Badges */}
-            <TechnologyBadges technologies={report.technologies} />
-
-            {/* Provenance Signals */}
-            <ProvenanceOverview provenance={report.provenance} />
-
-            {/* Data Coverage & Limitations Notice */}
-            <LimitationsNotice
-              coverage={report.dataCoverage}
-              notice={report.notice}
-            />
-          </div>
-        )}
-
-        {/* Printable View (Visible only during window.print()) */}
+        {/* Dedicated Print Report View (Visible only during window.print()) */}
         {report && <PrintReport report={report} />}
       </main>
 

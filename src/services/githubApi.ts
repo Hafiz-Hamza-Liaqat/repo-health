@@ -11,6 +11,7 @@ import {
   GitHubRelease,
   GitHubRepo,
   GitHubTag,
+  GitHubTreeResponse,
   GitHubWorkflow,
   GitHubWorkflowRun,
 } from '../types/github';
@@ -20,30 +21,13 @@ import { sessionCache } from './cache';
 import { safeBase64Decode } from '../utils/sanitize';
 
 const GITHUB_API_BASE = 'https://api.github.com';
-const USER_TOKEN_KEY = 'repohealth_user_pat';
 
 export class GitHubApiService {
+  // Store optional token strictly in JavaScript memory only
   private customToken: string | null = null;
-
-  constructor() {
-    try {
-      this.customToken = sessionStorage.getItem(USER_TOKEN_KEY);
-    } catch {
-      this.customToken = null;
-    }
-  }
 
   public setCustomToken(token: string | null): void {
     this.customToken = token && token.trim() ? token.trim() : null;
-    try {
-      if (this.customToken) {
-        sessionStorage.setItem(USER_TOKEN_KEY, this.customToken);
-      } else {
-        sessionStorage.removeItem(USER_TOKEN_KEY);
-      }
-    } catch {
-      // Ignore
-    }
   }
 
   public getCustomToken(): string | null {
@@ -237,9 +221,10 @@ export class GitHubApiService {
     const releases = releasesRes.data || [];
     const tags = tagsRes.data || [];
 
-    // Stage 6: Commits & Contributors (Sampled for provenance signals)
-    onProgress?.('fetching_history', 'Sampling recent commits and contributors...');
-    const [commitsRes, contributorsRes, contentsRes] = await Promise.all([
+    // Stage 6: Commits, Contributors, Contents, and Recursive Git Tree
+    onProgress?.('fetching_history', 'Sampling commits, contributors, and repository tree...');
+    const defaultBranch = repository.default_branch || 'HEAD';
+    const [commitsRes, contributorsRes, contentsRes, treeRes] = await Promise.all([
       this.request<GitHubCommit[]>(`/repos/${owner}/${repo}/commits?per_page=10`, {
         allowNotFound: true,
       }),
@@ -250,20 +235,40 @@ export class GitHubApiService {
       this.request<GitHubContentItem[]>(`/repos/${owner}/${repo}/contents`, {
         allowNotFound: true,
       }),
+      this.request<GitHubTreeResponse>(
+        `/repos/${owner}/${repo}/git/trees/${encodeURIComponent(defaultBranch)}?recursive=1`,
+        { allowNotFound: true }
+      ),
     ]);
     if (commitsRes.error) apiErrors.push(commitsRes.error);
     if (contributorsRes.error) apiErrors.push(contributorsRes.error);
     if (contentsRes.error) apiErrors.push(contentsRes.error);
+    if (treeRes.error) apiErrors.push(treeRes.error);
 
     const commits = commitsRes.data || [];
     const contributors = contributorsRes.data || [];
     const rootItems = contentsRes.data || [];
-    const rootFiles = Array.isArray(rootItems) ? rootItems.map((i) => i.name) : [];
+
+    const gitTree = treeRes.data
+      ? {
+          items: treeRes.data.tree || [],
+          isTruncated: !!treeRes.data.truncated,
+          totalItemsCount: treeRes.data.tree?.length || 0,
+        }
+      : null;
+
+    // Combine root files from contents and tree
+    const rootFiles = Array.from(
+      new Set([
+        ...(Array.isArray(rootItems) ? rootItems.map((i) => i.name) : []),
+        ...(gitTree ? gitTree.items.filter((i) => !i.path.includes('/')).map((i) => i.path) : []),
+      ])
+    );
 
     // Stage 7: Fetch manifests for technology detection (if present in root)
     const manifestContents: RawAnalysisData['manifestContents'] = {};
 
-    const packageJsonItem = rootItems.find?.((i) => i.name.toLowerCase() === 'package.json');
+    const packageJsonItem = rootFiles.find((f) => f.toLowerCase() === 'package.json');
     if (packageJsonItem) {
       const pRes = await this.request<GitHubContentItem>(
         `/repos/${owner}/${repo}/contents/package.json`,
@@ -279,7 +284,7 @@ export class GitHubApiService {
       }
     }
 
-    const pyprojectItem = rootItems.find?.((i) => i.name.toLowerCase() === 'pyproject.toml');
+    const pyprojectItem = rootFiles.find((f) => f.toLowerCase() === 'pyproject.toml');
     if (pyprojectItem) {
       const pyRes = await this.request<GitHubContentItem>(
         `/repos/${owner}/${repo}/contents/pyproject.toml`,
@@ -290,7 +295,7 @@ export class GitHubApiService {
       }
     }
 
-    const cargoItem = rootItems.find?.((i) => i.name.toLowerCase() === 'cargo.toml');
+    const cargoItem = rootFiles.find((f) => f.toLowerCase() === 'cargo.toml');
     if (cargoItem) {
       const cRes = await this.request<GitHubContentItem>(
         `/repos/${owner}/${repo}/contents/Cargo.toml`,
@@ -301,7 +306,7 @@ export class GitHubApiService {
       }
     }
 
-    const goModItem = rootItems.find?.((i) => i.name.toLowerCase() === 'go.mod');
+    const goModItem = rootFiles.find((f) => f.toLowerCase() === 'go.mod');
     if (goModItem) {
       const gRes = await this.request<GitHubContentItem>(
         `/repos/${owner}/${repo}/contents/go.mod`,
@@ -312,7 +317,7 @@ export class GitHubApiService {
       }
     }
 
-    const dockerItem = rootItems.find?.((i) => i.name.toLowerCase() === 'dockerfile');
+    const dockerItem = rootFiles.find((f) => f.toLowerCase() === 'dockerfile');
     if (dockerItem) {
       const dRes = await this.request<GitHubContentItem>(
         `/repos/${owner}/${repo}/contents/Dockerfile`,
@@ -335,6 +340,7 @@ export class GitHubApiService {
       commits,
       contributors,
       rootFiles,
+      tree: gitTree,
       manifestContents,
       apiErrors,
     };

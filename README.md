@@ -2,7 +2,7 @@
 
 **Tagline:** *Evaluate code. Verify evidence. Make better hiring decisions.*  
 **GitHub Repository:** `repo-health`  
-**Product Version:** `1.0.0 (Phase 1 MVP)`  
+**Product Version:** `1.1.0 (Phase 1.1 Correctness & Report Export Update)`  
 **License:** [MIT](LICENSE)
 
 ---
@@ -13,12 +13,12 @@ RepoHealth is a professional GitHub repository health and developer evidence ana
 
 Rather than relying on popularity metrics (such as GitHub stars, forks, or superficial follower counts) or assuming that code is high quality simply because a repository has a README, RepoHealth performs deterministic analysis across:
 
-- **Documentation Depth:** Detects real architectural overview, setup commands, usage code blocks, testing instructions, and live deployment links.
+- **Documentation Depth:** Detects real architectural overview, setup commands, usage code blocks, testing instructions, and live deployment links via an ATX heading parser stripping leading numbering and punctuation without false warnings.
 - **License Compliance:** Identifies standard SPDX licenses, standalone root license documents, and enterprise distribution clarity.
 - **CI/CD Automation:** Verifies GitHub Actions workflow configurations, triggers, and recent run execution health (passing vs. failing).
-- **Testing Evidence:** Identifies testing infrastructure (Vitest, Jest, Playwright, pytest, Go test, Cargo test), manifest test scripts, and test suite directories.
+- **Testing Evidence:** Discovers test infrastructure and tracked test files recursively via GitHub's Git Trees API (`test/`, `tests/`, `src/test/`, `*.test.ts`, `*.spec.ts`, `*_test.go`, etc.), recognizing nested and co-located test structures without requiring a root folder.
 - **Release Cadence:** Distinguishes official GitHub releases with changelogs from raw Git tags.
-- **Repository Metadata:** Evaluates description clarity, topic discovery, default branch hygiene, and maintenance recency.
+- **Repository Metadata:** Evaluates description clarity, topic discovery, default branch hygiene, and maintenance recency, cross-validating `size: 0 KB` with active content to eliminate false empty-repository warnings.
 - **Technology Stack Detection:** Discovers frameworks and runtimes with evidence confidence levels (`strongly_evidenced`, `detected`, `config_or_dependency_only`, `inferred`).
 - **Defensible Provenance Signals:** Samples public contributor distribution, bot activity (Dependabot, Renovate), and explicit AI tooling artifacts (`.cursorrules`, Copilot instructions) without unvalidated AI-authorship claims.
 
@@ -36,13 +36,15 @@ RepoHealth values demonstrable engineering practices. Scores are transparent, re
   - **Engineering Evidence:** Prioritizes testing and CI/CD pipelines (60% weight allocated to automated testing and CI).
   - **Presentation & Professionalism:** Prioritizes external onboarding, comprehensive documentation, and open-source licensing clarity (70% weight).
 - **Transparent Denominator Normalization:** When a category is marked not applicable, the denominator adjusts fairly without penalizing the repository.
+- **Comprehensive Finding Status Accounting:** Displays all 5 finding statuses (Pass, Warning, Issue, Not Detected, Unknown) reconciling exactly with total evaluated rules.
+- **Data Coverage Separation:** Explicitly distinguishes endpoint query accounting (e.g. `10/10 responses`) from repository tree coverage completeness and absent optional resources (e.g. no releases or workflows).
 - **Prioritized Recommendations:** Actionable remediation items categorized by severity (High, Medium, Low) with direct rationale.
 - **Export & Sharing Options:**
-  - **JSON Export:** Download full versioned report schema (`RepoHealthReport_v1`).
+  - **JSON Export:** Download full versioned report schema (`RepoHealthReport_v1.1`).
   - **One-Click Markdown Summary:** Copies a formatted summary directly to the clipboard.
-  - **Print & Save as PDF:** Custom `@media print` stylesheet optimized for multi-page PDF generation.
-- **Optional Personal Token Storage:** Store an optional GitHub Personal Access Token strictly in browser session memory to increase the hourly limit from 60 to 5,000 requests/hr during intense evaluation sessions.
-- **Session Caching:** In-memory and sessionStorage cache with 15-minute TTL eliminates redundant requests.
+  - **Dedicated Print & PDF Export:** Custom clean layout outputting exclusively the structured report (all interactive elements, search inputs, and duplicate UI elements hidden in `@media print`).
+- **Memory-Only Token Option:** Store an optional GitHub Personal Access Token strictly in JavaScript memory (never written to `localStorage` or `sessionStorage`) to increase the hourly limit from 60 to 5,000 requests/hr during intense evaluation sessions.
+- **Session Caching:** In-memory request cache with 15-minute TTL eliminates redundant requests.
 
 ---
 
@@ -147,7 +149,7 @@ Users can switch assessment perspectives instantly to recalculate the score with
 ### Installation
 ```bash
 # Clone the repository
-git clone https://github.com/repo-health/repo-health.git
+git clone https://github.com/Hafiz-Hamza-Liaqat/repo-health.git
 cd repo-health
 
 # Install dependencies
@@ -190,7 +192,7 @@ npm run preview
 ## 7. API Limitations & Rate Limits
 
 - **Public Unauthenticated Limit:** GitHub REST API permits **60 requests per hour** per IP address.
-- **Session Token Upgrade:** Users can click the key icon in the navigation bar to provide an optional Personal Access Token (stored only in browser session memory), which immediately upgrades their rate limit to **5,000 requests per hour**.
+- **Memory Token Upgrade:** Users can click the key icon in the navigation bar to provide an optional Personal Access Token (held strictly in JavaScript memory during the active session), which immediately upgrades their rate limit to **5,000 requests per hour**.
 - **Graceful Partial Results:** If secondary endpoints fail (e.g., GitHub Actions runs endpoint returns 403 or 404), RepoHealth does not crash; it logs the reduced coverage and calculates the score with clear limitation notes.
 
 ---
@@ -199,7 +201,7 @@ npm run preview
 
 - **Untrusted Content Safety:** All text extracted from repositories and README files is treated as untrusted data and sanitized to prevent script injection.
 - **No Code Execution:** Repository code is analyzed strictly via metadata and file contents. No repository code is downloaded or executed locally.
-- **Credential Safety:** RepoHealth contains no hardcoded tokens, client secrets, or private keys. Optional user-provided tokens are stored solely in memory or `sessionStorage` and are never transmitted to any third-party server.
+- **Credential Safety:** RepoHealth contains no hardcoded tokens, client secrets, or private keys. Optional user-provided tokens are held solely in JavaScript memory for the current browser session (never written to `localStorage` or `sessionStorage`) and are discarded on tab close or page reload.
 
 ---
 

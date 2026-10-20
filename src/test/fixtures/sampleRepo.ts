@@ -232,6 +232,24 @@ export const mockRawAnalysisData: RawAnalysisData = {
     'src',
     '.github',
   ],
+  tree: {
+    items: [
+      { path: 'README.md', mode: '100644', type: 'blob', sha: 'abcdef123456', size: 1200, url: '' },
+      { path: 'LICENSE', mode: '100644', type: 'blob', sha: 'lic123', size: 1080, url: '' },
+      { path: 'package.json', mode: '100644', type: 'blob', sha: 'pkg123', size: 550, url: '' },
+      { path: 'tsconfig.json', mode: '100644', type: 'blob', sha: 'tsc123', size: 300, url: '' },
+      { path: 'vitest.config.ts', mode: '100644', type: 'blob', sha: 'vit123', size: 240, url: '' },
+      { path: 'src', mode: '040000', type: 'tree', sha: 'src123', url: '' },
+      { path: 'src/index.ts', mode: '100644', type: 'blob', sha: 'idx123', size: 800, url: '' },
+      { path: 'src/components', mode: '040000', type: 'tree', sha: 'cmp123', url: '' },
+      { path: 'src/components/App.tsx', mode: '100644', type: 'blob', sha: 'app123', size: 1500, url: '' },
+      { path: 'src/components/App.test.tsx', mode: '100644', type: 'blob', sha: 'tst123', size: 1800, url: '' },
+      { path: 'tests', mode: '040000', type: 'tree', sha: 'tsts123', url: '' },
+      { path: 'tests/integration.test.ts', mode: '100644', type: 'blob', sha: 'int123', size: 2200, url: '' },
+    ],
+    isTruncated: false,
+    totalItemsCount: 12,
+  },
   manifestContents: {
     packageJson: {
       name: 'sample-project',

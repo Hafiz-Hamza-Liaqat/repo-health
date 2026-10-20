@@ -1,9 +1,9 @@
 import { AssessmentScoreResult, Finding, ScoringPerspectiveKey } from './scoring';
 import { DetectedTechnology } from './technology';
-import { ProvenanceSignals } from './analysis';
+import { DataCoverage, ProvenanceSignals } from './analysis';
 
 export interface RepoHealthReport {
-  version: '1.0.0';
+  version: '1.1.0' | '1.0.0';
   schemaVersion: string;
   generatedAt: string;
   analyzerVersion: string;
@@ -26,6 +26,7 @@ export interface RepoHealthReport {
       forks: number;
       openIssues: number;
       watchers: number;
+      sizeKb: number;
     };
     license: {
       spdxId: string | null;
@@ -42,14 +43,7 @@ export interface RepoHealthReport {
   findings: Finding[];
   technologies: DetectedTechnology[];
   provenance: ProvenanceSignals;
-  dataCoverage: {
-    endpointsTotal: number;
-    endpointsSucceeded: number;
-    endpointsFailed: number;
-    coveragePercentage: number;
-    limitations: string[];
-    failedEndpoints: string[];
-  };
+  dataCoverage: DataCoverage;
   recommendations: Array<{
     id: string;
     category: string;

@@ -8,37 +8,61 @@
   }
 }
 
-/* Print Stylesheet for Print & Save as PDF */
+/* ==========================================================================
+   Print Stylesheet for Clean, Dedicated PDF / Print Output
+   ========================================================================== */
+@media screen {
+  /* Never show the print report on screen */
+  .print-report-container {
+    display: none !important;
+  }
+}
+
 @media print {
-  body {
-    background-color: white !important;
+  /* Set light clean background on paper */
+  body, html {
+    background-color: #ffffff !important;
     color: #0f172a !important;
+    font-size: 11pt !important;
+    line-height: 1.4 !important;
   }
 
-  /* Hide interactive navigation, toolbar, inputs, and settings in print */
+  /* Completely hide all interactive UI, header, footer, forms, and dashboard */
   header,
   footer,
   .no-print,
+  .interactive-dashboard,
+  .action-toolbar,
   button,
-  input,
-  .action-toolbar {
+  input {
     display: none !important;
   }
 
-  /* Ensure card backgrounds and borders are crisp on white paper */
-  .print-container {
+  /* Show ONLY the dedicated print report */
+  .print-report-container {
+    display: block !important;
+    background-color: #ffffff !important;
+    color: #0f172a !important;
     padding: 0 !important;
     margin: 0 !important;
     max-width: 100% !important;
     box-shadow: none !important;
   }
 
+  /* Avoid awkward page breaks inside cards, tables, and findings */
+  .print-avoid-break {
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
+  }
+
+  /* High contrast text and borders on paper */
   .print-card {
     background-color: #f8fafc !important;
     border: 1px solid #cbd5e1 !important;
     color: #0f172a !important;
-    break-inside: avoid;
     margin-bottom: 1rem !important;
+    padding: 0.75rem !important;
+    border-radius: 6px !important;
   }
 
   .print-text-dark {
@@ -53,13 +77,4 @@
     text-decoration: underline !important;
     color: #0369a1 !important;
   }
-
-  /* Show print report header */
-  .print-only-header {
-    display: block !important;
-  }
-}
-
-.print-only-header {
-  display: none;
 }

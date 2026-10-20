@@ -1,4 +1,15 @@
-import { GitHubCommit, GitHubContributor, GitHubLicense, GitHubReadme, GitHubRelease, GitHubRepo, GitHubTag, GitHubWorkflow, GitHubWorkflowRun } from './github';
+import {
+  GitHubCommit,
+  GitHubContributor,
+  GitHubLicense,
+  GitHubReadme,
+  GitHubRelease,
+  GitHubRepo,
+  GitHubTag,
+  GitHubTreeItem,
+  GitHubWorkflow,
+  GitHubWorkflowRun,
+} from './github';
 import { Finding } from './scoring';
 import { DetectedTechnology } from './technology';
 
@@ -52,6 +63,27 @@ export interface PackageJsonManifest {
   [key: string]: unknown;
 }
 
+export interface GitTreeData {
+  items: GitHubTreeItem[];
+  isTruncated: boolean;
+  totalItemsCount: number;
+}
+
+export type TreeCoverageStatus = 'complete' | 'truncated' | 'unavailable';
+
+export interface DataCoverage {
+  endpointsTotal: number;
+  endpointsSucceeded: number;
+  endpointsFailed: number;
+  failedEndpoints: string[];
+  endpointResponseLabel: string;
+  treeStatus: TreeCoverageStatus;
+  treeItemsCount: number;
+  treeCoverageNote: string;
+  absentOptionalResources: string[];
+  limitations: string[];
+}
+
 export interface RawAnalysisData {
   repo: GitHubRepo;
   languages: Record<string, number>;
@@ -64,6 +96,7 @@ export interface RawAnalysisData {
   commits: GitHubCommit[];
   contributors: GitHubContributor[];
   rootFiles: string[];
+  tree: GitTreeData | null;
   manifestContents: {
     packageJson?: PackageJsonManifest;
     pyprojectToml?: string;
@@ -80,10 +113,5 @@ export interface AnalysisOutcome {
   technologies: DetectedTechnology[];
   provenance: ProvenanceSignals;
   limitations: string[];
-  coverage: {
-    endpointsTotal: number;
-    endpointsSucceeded: number;
-    endpointsFailed: number;
-    percentage: number;
-  };
+  coverage: DataCoverage;
 }

@@ -6,6 +6,82 @@ import { GitHubReadme, GitHubRepo } from '../types/github';
 import { Finding } from '../types/scoring';
 import { SCORING_RULES } from '../config/scoringRules';
 
+export interface MarkdownHeading {
+  level: number;
+  rawText: string;
+  cleanText: string;
+  normalizedText: string;
+  lineNumber: number;
+}
+
+/**
+ * Extracts and normalizes Markdown ATX headings from markdown content.
+ * Ignores code blocks and paragraph text.
+ */
+export function extractMarkdownHeadings(content: string): MarkdownHeading[] {
+  if (!content) return [];
+
+  const lines = content.split('\n');
+  const headings: MarkdownHeading[] = [];
+  let inCodeBlock = false;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trim();
+
+    // Toggle fenced code blocks
+    if (trimmed.startsWith('```') || trimmed.startsWith('~~~')) {
+      inCodeBlock = !inCodeBlock;
+      continue;
+    }
+
+    if (inCodeBlock) continue;
+
+    // Match ATX headings: # Heading
+    const atxMatch = trimmed.match(/^(#{1,6})\s+(.+?)(?:\s+#+)?$/);
+    if (atxMatch) {
+      const level = atxMatch[1].length;
+      const rawText = atxMatch[2].trim();
+
+      // Strip markdown formatting (bold, italic, code, links)
+      const cleanText = rawText
+        .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1') // [link text](url) -> link text
+        .replace(/[*_~`]/g, '') // formatting chars
+        .trim();
+
+      // Normalize: remove leading numbering like "1.", "1.1", "IV.", "Section 1:", etc.
+      const normalized = cleanText
+        .toLowerCase()
+        .replace(/^(?:(?:section|part|step|chapter)\s+)?(?:[0-9]+(?:\.[0-9]+)*|[ivxlcdm]+)[\s.:)-]+\s*/i, '')
+        .replace(/[:\-–—]+$/, '') // trailing punctuation
+        .trim();
+
+      headings.push({
+        level,
+        rawText,
+        cleanText,
+        normalizedText: normalized,
+        lineNumber: i + 1,
+      });
+    }
+  }
+
+  return headings;
+}
+
+/**
+ * Checks if a normalized heading matches one of the provided pattern terms.
+ */
+function matchesHeadingPattern(heading: MarkdownHeading, patterns: (string | RegExp)[]): boolean {
+  const norm = heading.normalizedText;
+  return patterns.some((p) => {
+    if (typeof p === 'string') {
+      return norm === p || norm.startsWith(`${p} `) || norm.endsWith(` ${p}`) || norm.includes(` ${p} `);
+    }
+    return p.test(norm);
+  });
+}
+
 export function analyzeReadme(
   readme: GitHubReadme | null,
   repo: GitHubRepo
@@ -88,15 +164,54 @@ export function analyzeReadme(
     return findings;
   }
 
+  const headings = extractMarkdownHeadings(content);
   const lowerContent = content.toLowerCase();
 
   // DOC-02: Project Purpose & Overview
   const doc02Rule = SCORING_RULES['DOC-02'];
-  const hasOverviewHeadings = /(?:#+\s*(?:overview|about|introduction|what is|features|motivation|purpose|background))/i.test(content);
-  const repoHasDescriptionInReadme = repo.description && lowerContent.includes(repo.description.toLowerCase().slice(0, 30));
-  const hasSubstantialText = content.split('\n').filter((l) => l.trim().length > 30).length >= 3;
+  const overviewPatterns = [
+    'project purpose',
+    'purpose',
+    'project overview',
+    'overview',
+    'about',
+    'about the project',
+    'what is',
+    'introduction',
+    'intro',
+    'motivation',
+    'background',
+    'key features',
+    'core features',
+    'features',
+    'architecture overview',
+    'system overview',
+    'architecture',
+    'mission',
+    'scope',
+    'problem statement',
+    'why',
+  ];
 
-  if (hasOverviewHeadings || (repoHasDescriptionInReadme && hasSubstantialText)) {
+  const matchedOverviewHeading = headings.find((h) =>
+    matchesHeadingPattern(h, overviewPatterns)
+  );
+
+  // Supplementary: Check for substantive introductory paragraph (non-heading lines with description)
+  const repoHasDescriptionInReadme = !!(
+    repo.description &&
+    repo.description.length > 15 &&
+    lowerContent.includes(repo.description.toLowerCase().slice(0, 30))
+  );
+
+  // Substantive text in first 25 lines (ignoring headings and blank lines)
+  const introLines = content
+    .split('\n')
+    .slice(0, 25)
+    .filter((l) => !l.trim().startsWith('#') && !l.trim().startsWith('```') && l.trim().length > 30);
+  const hasSubstantialIntroText = introLines.length >= 2;
+
+  if (matchedOverviewHeading) {
     findings.push({
       id: 'DOC-02-pass',
       ruleId: 'DOC-02',
@@ -106,10 +221,44 @@ export function analyzeReadme(
       severity: 'info',
       scoreEffect: doc02Rule.basePoints,
       maxEffect: doc02Rule.basePoints,
-      explanation: 'The README contains explicit section headers or descriptive paragraphs explaining project scope and features.',
+      explanation: `README articulates project scope and purpose via section heading "${matchedOverviewHeading.rawText}" (line ${matchedOverviewHeading.lineNumber}).`,
       evidence: {
-        label: 'Overview Signal',
-        value: hasOverviewHeadings ? 'Dedicated overview/features header' : 'Substantive introductory summary',
+        label: 'Section Heading',
+        value: `"${matchedOverviewHeading.rawText}" (line ${matchedOverviewHeading.lineNumber})`,
+        sourceUrl: readmeUrl,
+      },
+    });
+  } else if (repoHasDescriptionInReadme && hasSubstantialIntroText) {
+    findings.push({
+      id: 'DOC-02-pass',
+      ruleId: 'DOC-02',
+      category: 'documentation',
+      title: 'Project Purpose & Scope Articulated',
+      status: 'pass',
+      severity: 'info',
+      scoreEffect: doc02Rule.basePoints,
+      maxEffect: doc02Rule.basePoints,
+      explanation: 'README articulates project scope and architecture in substantive introductory paragraphs aligned with repository metadata.',
+      evidence: {
+        label: 'Introductory Text',
+        value: 'Substantive overview paragraphs detected in README introduction',
+        sourceUrl: readmeUrl,
+      },
+    });
+  } else if (hasSubstantialIntroText) {
+    findings.push({
+      id: 'DOC-02-partial',
+      ruleId: 'DOC-02',
+      category: 'documentation',
+      title: 'Project Overview Evidenced in Text (No Dedicated Header)',
+      status: 'pass',
+      severity: 'info',
+      scoreEffect: doc02Rule.basePoints,
+      maxEffect: doc02Rule.basePoints,
+      explanation: 'Introductory paragraphs describe project scope, though lacking an explicit "Project Purpose" or "Overview" ATX heading.',
+      evidence: {
+        label: 'Introduction Text',
+        value: 'Multi-line introduction text found in README',
         sourceUrl: readmeUrl,
       },
     });
@@ -124,10 +273,10 @@ export function analyzeReadme(
       scoreEffect: 1,
       maxEffect: doc02Rule.basePoints,
       explanation: 'No clear overview, feature list, or architecture summary section was detected in the README.',
-      recommendation: 'Add an "Overview" or "Features" heading near the top explaining the problem the project solves.',
+      recommendation: 'Add a "Project Purpose", "Overview", or "Features" heading near the top explaining the problem the project solves.',
       evidence: {
         label: 'README Structure',
-        value: 'Missing standard overview / introduction headings',
+        value: 'Missing standard overview, purpose, or architecture headings',
         sourceUrl: readmeUrl,
       },
     });
@@ -135,10 +284,29 @@ export function analyzeReadme(
 
   // DOC-03: Installation & Environment Setup
   const doc03Rule = SCORING_RULES['DOC-03'];
-  const hasInstallHeaders = /(?:#+\s*(?:install(?:ation)?|getting started|setup|prerequisites|requirements|quick\s*start))/i.test(content);
-  const hasInstallCommands = /(?:npm (?:install|i|ci)|yarn (?:install|add)|pnpm (?:install|add)|pip install|poetry install|cargo build|go get|docker compose up)/i.test(content);
+  const installPatterns = [
+    'installation',
+    'install',
+    'setup',
+    'getting started',
+    'quick start',
+    'prerequisites',
+    'requirements',
+    'building from source',
+    'build and run',
+    'how to run',
+    'development setup',
+    'setup instructions',
+    'setup and development commands',
+  ];
 
-  if (hasInstallHeaders && hasInstallCommands) {
+  const matchedInstallHeading = headings.find((h) =>
+    matchesHeadingPattern(h, installPatterns)
+  );
+
+  const hasInstallCommands = /(?:npm (?:install|i|ci|run dev)|yarn (?:install|add)|pnpm (?:install|add)|pip install|poetry install|cargo (?:build|run)|go (?:get|run|build)|docker compose up)/i.test(content);
+
+  if (matchedInstallHeading && hasInstallCommands) {
     findings.push({
       id: 'DOC-03-pass',
       ruleId: 'DOC-03',
@@ -148,14 +316,14 @@ export function analyzeReadme(
       severity: 'info',
       scoreEffect: doc03Rule.basePoints,
       maxEffect: doc03Rule.basePoints,
-      explanation: 'README documents installation instructions with dedicated headers and package management commands.',
+      explanation: `README documents installation instructions with section "${matchedInstallHeading.rawText}" and executable commands.`,
       evidence: {
-        label: 'Setup Evidence',
-        value: 'Dedicated installation section with runnable command snippets',
+        label: 'Setup Section',
+        value: `"${matchedInstallHeading.rawText}" with command snippets`,
         sourceUrl: readmeUrl,
       },
     });
-  } else if (hasInstallHeaders || hasInstallCommands) {
+  } else if (matchedInstallHeading || hasInstallCommands) {
     findings.push({
       id: 'DOC-03-warning',
       ruleId: 'DOC-03',
@@ -169,7 +337,7 @@ export function analyzeReadme(
       recommendation: 'Provide explicit prerequisites, installation commands, and environment variable configuration instructions.',
       evidence: {
         label: 'Observation',
-        value: hasInstallHeaders ? 'Header found without explicit commands' : 'Commands found without structured header',
+        value: matchedInstallHeading ? `Header "${matchedInstallHeading.rawText}" found without explicit commands` : 'Commands found without structured header',
         sourceUrl: readmeUrl,
       },
     });
@@ -195,10 +363,31 @@ export function analyzeReadme(
 
   // DOC-04: Usage Examples / Quick Start
   const doc04Rule = SCORING_RULES['DOC-04'];
-  const hasUsageHeaders = /(?:#+\s*(?:usage|examples?|how to use|api|quick\s*start|walkthrough))/i.test(content);
+  const usagePatterns = [
+    'usage',
+    'usage guide',
+    'how to use',
+    'examples',
+    'example',
+    'quick start',
+    'walkthrough',
+    'guide',
+    'api',
+    'cli usage',
+    'commands',
+    'development commands',
+    'verification commands',
+    'scoring methodology',
+    'running',
+  ];
+
+  const matchedUsageHeading = headings.find((h) =>
+    matchesHeadingPattern(h, usagePatterns)
+  );
+
   const hasCodeBlocks = /```[a-zA-Z]*\n[\s\S]{10,}\n```/.test(content);
 
-  if (hasUsageHeaders && hasCodeBlocks) {
+  if (matchedUsageHeading && hasCodeBlocks) {
     findings.push({
       id: 'DOC-04-pass',
       ruleId: 'DOC-04',
@@ -208,14 +397,14 @@ export function analyzeReadme(
       severity: 'info',
       scoreEffect: doc04Rule.basePoints,
       maxEffect: doc04Rule.basePoints,
-      explanation: 'README provides dedicated usage instructions supported by formatted code blocks.',
+      explanation: `README provides dedicated usage instructions under "${matchedUsageHeading.rawText}" supported by formatted code blocks.`,
       evidence: {
         label: 'Usage Section',
-        value: 'Usage/Examples header with formatted code blocks',
+        value: `"${matchedUsageHeading.rawText}" with code blocks`,
         sourceUrl: readmeUrl,
       },
     });
-  } else if (hasCodeBlocks || hasUsageHeaders) {
+  } else if (hasCodeBlocks || matchedUsageHeading) {
     findings.push({
       id: 'DOC-04-warning',
       ruleId: 'DOC-04',
@@ -229,7 +418,7 @@ export function analyzeReadme(
       recommendation: 'Include practical, copy-pasteable usage examples showing how to interact with the project.',
       evidence: {
         label: 'Observation',
-        value: hasCodeBlocks ? 'Code blocks present without dedicated usage section' : 'Usage header present without code examples',
+        value: hasCodeBlocks ? 'Code blocks present without dedicated usage section' : `Usage header "${matchedUsageHeading?.rawText}" present without code examples`,
         sourceUrl: readmeUrl,
       },
     });
@@ -255,10 +444,25 @@ export function analyzeReadme(
 
   // DOC-05: Testing Guidance in Documentation
   const doc05Rule = SCORING_RULES['DOC-05'];
-  const hasTestHeaders = /(?:#+\s*(?:tests?|testing|running tests?|test suite))/i.test(content);
-  const hasTestCommands = /(?:npm test|yarn test|pnpm test|vitest|jest|pytest|cargo test|go test|flutter test)/i.test(content);
+  const testingPatterns = [
+    'tests',
+    'testing',
+    'running tests',
+    'run tests',
+    'test suite',
+    'how to test',
+    'verification',
+    'verification commands',
+    'quality commands',
+  ];
 
-  if (hasTestHeaders || hasTestCommands) {
+  const matchedTestingHeading = headings.find((h) =>
+    matchesHeadingPattern(h, testingPatterns)
+  );
+
+  const hasTestCommands = /(?:npm (?:test|run test)|yarn test|pnpm test|vitest|jest|pytest|cargo test|go test|flutter test)/i.test(content);
+
+  if (matchedTestingHeading || hasTestCommands) {
     findings.push({
       id: 'DOC-05-pass',
       ruleId: 'DOC-05',
@@ -268,10 +472,10 @@ export function analyzeReadme(
       severity: 'info',
       scoreEffect: doc05Rule.basePoints,
       maxEffect: doc05Rule.basePoints,
-      explanation: 'README documents how to run automated tests, enabling third-party verification.',
+      explanation: `README documents how to run automated tests (${matchedTestingHeading ? `heading "${matchedTestingHeading.rawText}"` : 'command references'}), enabling third-party verification.`,
       evidence: {
         label: 'Testing Doc Signal',
-        value: hasTestHeaders ? 'Dedicated testing header found' : 'Command "npm test / pytest / cargo test" referenced',
+        value: matchedTestingHeading ? `Heading "${matchedTestingHeading.rawText}"` : 'Test execution commands documented in text',
         sourceUrl: readmeUrl,
       },
     });
@@ -297,12 +501,26 @@ export function analyzeReadme(
 
   // DOC-06: Contribution Guidance / Live Demo Links
   const doc06Rule = SCORING_RULES['DOC-06'];
-  const hasContrib = /(?:#+\s*(?:contribut(?:ing|e)|development|guidelines)|contributing\.md)/i.test(content);
+  const contribPatterns = [
+    'contributing',
+    'contribution',
+    'contribute',
+    'development',
+    'guidelines',
+    'developer guide',
+  ];
+
+  const matchedContribHeading = headings.find((h) =>
+    matchesHeadingPattern(h, contribPatterns)
+  );
+
+  const hasContribFile = /contributing\.md/i.test(content);
   const hasDemo = /(?:https?:\/\/[^\s)]+(?:vercel\.app|netlify\.app|github\.io|pages\.dev|fly\.dev|herokuapp\.com|onrender\.com))/i.test(content) || !!repo.homepage;
 
-  if (hasContrib || hasDemo) {
+  if (matchedContribHeading || hasContribFile || hasDemo) {
     const signals: string[] = [];
-    if (hasContrib) signals.push('Contributing guidelines');
+    if (matchedContribHeading) signals.push(`Contributing section ("${matchedContribHeading.rawText}")`);
+    else if (hasContribFile) signals.push('Contributing guide reference');
     if (hasDemo) signals.push('Live demo / deployment link');
 
     findings.push({
