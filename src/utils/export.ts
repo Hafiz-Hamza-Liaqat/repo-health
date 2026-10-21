@@ -55,6 +55,22 @@ export function generateMarkdownSummary(report: RepoHealthReport): string {
     lines.push('- No specific frameworks confirmed from manifests');
   }
 
+  if (report.securityHygiene && report.securityHygiene.findings.length > 0) {
+    lines.push('');
+    lines.push('## Security & Supply-Chain Hygiene (Preliminary)');
+    report.securityHygiene.findings.forEach((f) => {
+      const statusIcon =
+        f.status === 'pass'
+          ? '✅ Pass'
+          : f.status === 'warning'
+          ? '⚠️ Warning'
+          : f.status === 'unknown'
+          ? '❓ Unknown'
+          : '⚪ Not Detected';
+      lines.push(`- **[${f.ruleId}] ${f.title}:** ${statusIcon} — ${f.explanation}`);
+    });
+  }
+
   lines.push('');
   lines.push('## Key Recommendations');
   if (report.recommendations.length > 0) {

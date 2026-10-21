@@ -8,6 +8,7 @@ import { DashboardHeader } from './components/dashboard/DashboardHeader';
 import { ScoreOverview } from './components/dashboard/ScoreOverview';
 import { PerspectiveSelector } from './components/dashboard/PerspectiveSelector';
 import { CategoryCards } from './components/dashboard/CategoryCards';
+import { SecurityHygieneCard } from './components/dashboard/SecurityHygieneCard';
 import { TechnologyBadges } from './components/dashboard/TechnologyBadges';
 import { ProvenanceOverview } from './components/dashboard/ProvenanceOverview';
 import { RecommendationsList } from './components/dashboard/RecommendationsList';
@@ -308,6 +309,11 @@ export function App() {
 
               {/* Category Findings Cards */}
               <CategoryCards categoryScores={report.scoring.assessment.categoryScores} />
+
+              {/* Security & Supply-Chain Hygiene (Preliminary Phase 2.1A) */}
+              {report.securityHygiene && (
+                <SecurityHygieneCard securityHygiene={report.securityHygiene} />
+              )}
 
               {/* Technology Stack Badges */}
               <TechnologyBadges technologies={report.technologies} />

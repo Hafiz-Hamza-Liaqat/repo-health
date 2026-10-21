@@ -11,6 +11,7 @@ import { analyzeReleases } from './releasesAnalyzer';
 import { analyzeMetadata } from './metadataAnalyzer';
 import { detectTechnologies } from './technologyDetector';
 import { analyzeProvenance } from './provenanceAnalyzer';
+import { analyzeSecurityHygiene } from './securityHygieneAnalyzer';
 
 export function runAllAnalyzers(raw: RawAnalysisData): AnalysisOutcome {
   const repo = raw.repo;
@@ -53,7 +54,10 @@ export function runAllAnalyzers(raw: RawAnalysisData): AnalysisOutcome {
     repo
   );
 
-  // 4. Calculate API endpoint responses and repository tree coverage
+  // 4. Security Hygiene indicators (Phase 2.1A)
+  const securityHygiene = analyzeSecurityHygiene(raw.tree, rootFiles);
+
+  // 5. Calculate API endpoint responses and repository tree coverage
   const totalEndpoints = 10; // repo, languages, readme, license, workflows, runs, releases, tags, contents, tree
   const failedEndpoints = raw.apiErrors.map((e) => e.endpoint);
   const endpointsFailed = raw.apiErrors.length;
@@ -142,5 +146,6 @@ export function runAllAnalyzers(raw: RawAnalysisData): AnalysisOutcome {
     provenance,
     limitations,
     coverage,
+    securityHygiene,
   };
 }

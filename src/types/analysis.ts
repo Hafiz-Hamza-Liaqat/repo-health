@@ -12,6 +12,7 @@ import {
 } from './github';
 import { Finding } from './scoring';
 import { DetectedTechnology } from './technology';
+import { SecurityHygieneAssessment } from './security';
 
 export type ScanStatus =
   | 'idle'
@@ -127,4 +128,5 @@ export interface AnalysisOutcome {
   provenance: ProvenanceSignals;
   limitations: string[];
   coverage: DataCoverage;
+  securityHygiene?: SecurityHygieneAssessment;
 }

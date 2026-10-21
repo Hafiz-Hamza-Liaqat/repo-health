@@ -8,8 +8,9 @@ import { AssessmentCategoryKey, ScoringPerspectiveKey } from '../types/scoring';
 import { calculateAssessmentScore } from './scoringEngine';
 import { generateRecommendations } from './recommendations';
 
+export const PRODUCT_VERSION = '2.1.0';
 export const ANALYZER_VERSION = '1.1.0';
-export const REPORT_SCHEMA_VERSION = 'https://repohealth.dev/schemas/v1.1/report.json';
+export const REPORT_SCHEMA_VERSION = 'https://repohealth.dev/schemas/v1.2/report.json';
 
 export function generateReport(
   outcome: AnalysisOutcome,
@@ -79,5 +80,6 @@ export function generateReport(
       assessmentPhilosophy:
         'RepoHealth values demonstrable engineering practices over popularity metrics. Star counts, fork counts, and mere presence of stub files do not inflate scores.',
     },
+    securityHygiene: outcome.securityHygiene,
   };
 }

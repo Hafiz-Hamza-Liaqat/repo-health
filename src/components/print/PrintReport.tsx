@@ -193,6 +193,46 @@ export const PrintReport: React.FC<PrintReportProps> = ({ report }) => {
         )}
       </div>
 
+      {/* Security & Supply-Chain Hygiene (Preliminary) */}
+      {report.securityHygiene && (
+        <div className="mb-6 print-avoid-break">
+          <h2 className="text-sm font-bold uppercase tracking-wider text-slate-800 mb-2 border-b border-slate-300 pb-1">
+            Security & Supply-Chain Hygiene (Preliminary)
+          </h2>
+          <div className="p-3 border border-slate-300 rounded bg-slate-50 text-xs mb-3">
+            <span className="font-bold text-slate-700 block mb-1">
+              Path-Level Heuristics ({report.securityHygiene.findings.length} evaluated)
+            </span>
+            <div className="flex gap-4 font-mono text-[11px]">
+              <span className="text-emerald-700 font-semibold">✓ Pass: {report.securityHygiene.summary.passCount}</span>
+              {report.securityHygiene.summary.warningCount > 0 && (
+                <span className="text-amber-700 font-semibold">⚠ Warning: {report.securityHygiene.summary.warningCount}</span>
+              )}
+              <span className="text-slate-600 font-semibold">○ Not Detected: {report.securityHygiene.summary.notDetectedCount}</span>
+              {report.securityHygiene.summary.unknownCount > 0 && (
+                <span className="text-purple-700 font-semibold">? Unknown: {report.securityHygiene.summary.unknownCount}</span>
+              )}
+            </div>
+          </div>
+          <div className="space-y-2">
+            {report.securityHygiene.findings.map((f) => (
+              <div key={f.id} className="p-2 border border-slate-200 rounded text-xs bg-white">
+                <div className="flex justify-between items-center mb-1">
+                  <span className="font-bold text-slate-900">{f.title}</span>
+                  <span className="font-mono text-[10px] uppercase font-bold text-slate-600">{f.ruleId} • {f.status}</span>
+                </div>
+                <p className="text-slate-700">{f.explanation}</p>
+                {f.evidence && (
+                  <p className="text-[11px] text-slate-500 font-mono mt-0.5">
+                    Evidence: {f.evidence.label} — {f.evidence.value}
+                  </p>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* 6. Prioritized Recommendations */}
       <div className="mb-6 print-avoid-break">
         <h2 className="text-sm font-bold uppercase tracking-wider text-slate-800 mb-2 border-b border-slate-300 pb-1">

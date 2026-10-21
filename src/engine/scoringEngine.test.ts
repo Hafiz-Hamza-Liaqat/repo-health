@@ -11,6 +11,35 @@ describe('Scoring Engine', () => {
     });
   });
 
+  it('should maintain exact v2.0.0 baseline weights for all three perspectives', () => {
+    expect(SCORING_PERSPECTIVES.balanced.weights).toEqual({
+      documentation: 20,
+      license: 15,
+      ci_cd: 20,
+      testing: 20,
+      releases: 10,
+      metadata: 15,
+    });
+
+    expect(SCORING_PERSPECTIVES.engineering.weights).toEqual({
+      documentation: 10,
+      license: 10,
+      ci_cd: 30,
+      testing: 30,
+      releases: 10,
+      metadata: 10,
+    });
+
+    expect(SCORING_PERSPECTIVES.presentation.weights).toEqual({
+      documentation: 30,
+      license: 25,
+      ci_cd: 10,
+      testing: 10,
+      releases: 10,
+      metadata: 15,
+    });
+  });
+
   it('should produce 100 score and A+ grade when all category findings pass', () => {
     const perfectFindings: Finding[] = [
       { id: '1', ruleId: 'DOC-01', category: 'documentation', title: 'Doc', status: 'pass', severity: 'info', scoreEffect: 10, maxEffect: 10, explanation: '' },

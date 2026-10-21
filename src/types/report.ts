@@ -1,6 +1,7 @@
 import { AssessmentScoreResult, Finding, ScoringPerspectiveKey } from './scoring';
 import { DetectedTechnology } from './technology';
 import { DataCoverage, ProvenanceSignals } from './analysis';
+import { SecurityHygieneAssessment } from './security';
 
 export interface RepoHealthReport {
   version: '1.1.0' | '1.0.0';
@@ -56,4 +57,5 @@ export interface RepoHealthReport {
     disclaimer: string;
     assessmentPhilosophy: string;
   };
+  securityHygiene?: SecurityHygieneAssessment;
 }
