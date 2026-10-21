@@ -1,21 +1,50 @@
-import React, { useState } from 'react';
-import { Search, ArrowRight, AlertCircle, X, Shield, FileText, Cpu } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { Search, ArrowRight, AlertCircle, X, Shield, FileText, Cpu, Clock, Key } from 'lucide-react';
 import { parseAndValidateGitHubUrl } from '../../analyzers/urlParser';
 import { EXAMPLE_REPOSITORIES, ExampleRepo } from '../../config/exampleRepos';
+import { rateLimitTracker, RateLimitState } from '../../services/rateLimit';
 
 interface ScanFormProps {
   onScan: (owner: string, repo: string) => void;
   isLoading: boolean;
   initialValue?: string;
+  onOpenSettings?: () => void;
 }
 
 export const ScanForm: React.FC<ScanFormProps> = ({
   onScan,
   isLoading,
   initialValue = '',
+  onOpenSettings,
 }) => {
   const [inputUrl, setInputUrl] = useState(initialValue);
   const [validationError, setValidationError] = useState<string | null>(null);
+  const [rateLimit, setRateLimit] = useState<RateLimitState>(rateLimitTracker.getState());
+
+  useEffect(() => {
+    return rateLimitTracker.subscribe((state) => {
+      setRateLimit(state);
+      if (!rateLimitTracker.isRateLimited()) {
+        setValidationError((prev) => (prev && /rate limit|quota/i.test(prev) ? null : prev));
+      }
+    });
+  }, []);
+
+  // Update inputUrl if initialValue changes (e.g. after scan error or preset selection)
+  useEffect(() => {
+    if (initialValue && initialValue !== inputUrl) {
+      setInputUrl(initialValue);
+    }
+  }, [initialValue, inputUrl]);
+
+  // Interval ticker when rate limited to update countdown
+  useEffect(() => {
+    if (!rateLimitTracker.isRateLimited()) return;
+    const interval = setInterval(() => {
+      setRateLimit(rateLimitTracker.getState());
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [rateLimit.remaining, rateLimit.isSecondaryLimit]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value;
@@ -25,8 +54,15 @@ export const ScanForm: React.FC<ScanFormProps> = ({
     }
   };
 
+  const isRateLimited = rateLimitTracker.isRateLimited();
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (isRateLimited) {
+      setValidationError(rateLimitTracker.getHumanResetMessage());
+      return;
+    }
+
     if (!inputUrl.trim()) {
       setValidationError('Please enter a GitHub repository URL or "owner/repository".');
       return;
@@ -46,7 +82,9 @@ export const ScanForm: React.FC<ScanFormProps> = ({
     const full = `https://github.com/${ex.owner}/${ex.repo}`;
     setInputUrl(full);
     setValidationError(null);
-    onScan(ex.owner, ex.repo);
+    if (!isRateLimited && !isLoading) {
+      onScan(ex.owner, ex.repo);
+    }
   };
 
   const handleClear = () => {
@@ -56,6 +94,29 @@ export const ScanForm: React.FC<ScanFormProps> = ({
 
   return (
     <div className="w-full max-w-3xl mx-auto space-y-6">
+      {/* Rate limit warning banner if quota is currently exhausted */}
+      {isRateLimited && (
+        <div className="p-3.5 bg-rose-950/70 border border-rose-800/80 rounded-xl text-xs text-rose-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-fadeIn">
+          <div className="flex items-start sm:items-center gap-2.5">
+            <Clock className="w-4 h-4 text-rose-400 shrink-0 mt-0.5 sm:mt-0" />
+            <div>
+              <strong className="text-white">GitHub API Rate Limit Reached:</strong>{' '}
+              {rateLimitTracker.getHumanResetMessage()}
+            </div>
+          </div>
+          {onOpenSettings && (
+            <button
+              type="button"
+              onClick={onOpenSettings}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-900/60 hover:bg-rose-900 text-rose-200 hover:text-white border border-rose-700/80 font-medium transition-colors shrink-0"
+            >
+              <Key className="w-3.5 h-3.5 text-rose-300" />
+              <span>Configure PAT</span>
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Input box */}
       <form onSubmit={handleSubmit} className="relative">
         <div className="relative flex items-center">
@@ -90,11 +151,14 @@ export const ScanForm: React.FC<ScanFormProps> = ({
 
             <button
               type="submit"
-              disabled={isLoading}
+              disabled={isLoading || isRateLimited}
+              title={isRateLimited ? rateLimitTracker.getHumanResetMessage() : 'Analyze repository'}
               className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg font-medium text-sm text-white bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed shadow-md transition-all"
             >
               {isLoading ? (
                 <span>Analyzing...</span>
+              ) : isRateLimited ? (
+                <span>Rate Limited</span>
               ) : (
                 <>
                   <span>Analyze</span>
@@ -122,8 +186,8 @@ export const ScanForm: React.FC<ScanFormProps> = ({
               key={ex.label}
               type="button"
               onClick={() => handleSelectExample(ex)}
-              disabled={isLoading}
-              className="px-2.5 py-1 rounded-md bg-slate-800/80 hover:bg-slate-800 hover:text-slate-200 border border-slate-700/60 text-slate-300 font-mono text-[11px] transition-colors"
+              disabled={isLoading || isRateLimited}
+              className="px-2.5 py-1 rounded-md bg-slate-800/80 hover:bg-slate-800 hover:text-slate-200 border border-slate-700/60 text-slate-300 font-mono text-[11px] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               title={`${ex.category}: ${ex.description}`}
             >
               {ex.label}

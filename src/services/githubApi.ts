@@ -16,18 +16,28 @@ import {
   GitHubWorkflowRun,
 } from '../types/github';
 import { ApiFetchError, RawAnalysisData } from '../types/analysis';
-import { rateLimitTracker } from './rateLimit';
+import { rateLimitTracker, RateLimitState } from './rateLimit';
 import { sessionCache } from './cache';
 import { safeBase64Decode } from '../utils/sanitize';
 
 const GITHUB_API_BASE = 'https://api.github.com';
 
+interface RequestOptions {
+  allowNotFound?: boolean;
+  maxRetries?: number;
+}
+
 export class GitHubApiService {
   // Store optional token strictly in JavaScript memory only
   private customToken: string | null = null;
 
+  // In-flight request deduplication map
+  private inFlightRequests = new Map<string, Promise<{ data: unknown; error: ApiFetchError | null }>>();
+
   public setCustomToken(token: string | null): void {
-    this.customToken = token && token.trim() ? token.trim() : null;
+    const trimmed = token && token.trim() ? token.trim() : null;
+    this.customToken = trimmed;
+    rateLimitTracker.setHasCustomToken(!!trimmed);
   }
 
   public getCustomToken(): string | null {
@@ -49,82 +59,308 @@ export class GitHubApiService {
     return headers;
   }
 
-  private async request<T>(
+  /**
+   * Request with in-flight deduplication and pre-flight quota checks
+   */
+  public async request<T>(
     endpoint: string,
-    options: { allowNotFound?: boolean } = {}
+    options: RequestOptions = {}
   ): Promise<{ data: T | null; error: ApiFetchError | null }> {
-    const url = `${GITHUB_API_BASE}${endpoint}`;
-
-    try {
-      const response = await fetch(url, {
-        headers: this.getHeaders(),
-      });
-
-      // Track rate limit headers
-      rateLimitTracker.updateFromHeaders(response.headers);
-
-      if (response.status === 403) {
-        const remaining = response.headers.get('x-ratelimit-remaining');
-        const resetTime = response.headers.get('x-ratelimit-reset');
-        const isRateLimit = remaining === '0';
-
-        return {
-          data: null,
-          error: {
-            endpoint,
-            status: 403,
-            message: isRateLimit
-              ? 'GitHub API unauthenticated rate limit reached (60 requests/hr). Please wait for reset or configure an optional personal token.'
-              : 'Access forbidden by GitHub API.',
-            isRateLimit,
-            rateLimitReset: resetTime ? parseInt(resetTime, 10) : undefined,
-          },
-        };
-      }
-
-      if (response.status === 404) {
-        if (options.allowNotFound) {
-          return { data: null, error: null };
-        }
-        return {
-          data: null,
-          error: {
-            endpoint,
-            status: 404,
-            message: 'Resource not found or private repository.',
-          },
-        };
-      }
-
-      if (!response.ok) {
-        let msg = `GitHub API error: ${response.status} ${response.statusText}`;
-        try {
-          const errBody = await response.json();
-          if (errBody?.message) {
-            msg = errBody.message;
-          }
-        } catch {
-          // Ignore json parse error
-        }
-        return {
-          data: null,
-          error: {
-            endpoint,
-            status: response.status,
-            message: msg,
-          },
-        };
-      }
-
-      const json = await response.json();
-      return { data: json as T, error: null };
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Network error connecting to GitHub API.';
+    // 1. Pre-flight rate limit check to prevent unnecessary requests
+    if (rateLimitTracker.isRateLimited() && endpoint !== '/rate_limit') {
+      const state = rateLimitTracker.getState();
+      const message = rateLimitTracker.getHumanResetMessage();
       return {
         data: null,
         error: {
           endpoint,
+          status: 403,
+          errorType: state.rateLimitType === 'secondary' ? 'rate_limit_secondary' : 'rate_limit_primary',
+          message,
+          isRateLimit: true,
+          isSecondaryRateLimit: state.isSecondaryLimit,
+          rateLimitReset: state.resetTime,
+          retryAfter: state.secondaryRetryAfter,
+        },
+      };
+    }
+
+    // 2. In-flight request deduplication key
+    const dedupeKey = `${this.customToken ? 'auth' : 'anon'}:${endpoint}`;
+    const existing = this.inFlightRequests.get(dedupeKey);
+    if (existing) {
+      return existing as Promise<{ data: T | null; error: ApiFetchError | null }>;
+    }
+
+    const promise = (async () => {
+      try {
+        return await this.executeWithRetry<T>(endpoint, options);
+      } finally {
+        this.inFlightRequests.delete(dedupeKey);
+      }
+    })();
+
+    this.inFlightRequests.set(dedupeKey, promise as Promise<{ data: unknown; error: ApiFetchError | null }>);
+    return promise;
+  }
+
+  /**
+   * Execute fetch with bounded exponential backoff for transient failures (5xx or network errors)
+   */
+  private async executeWithRetry<T>(
+    endpoint: string,
+    options: RequestOptions
+  ): Promise<{ data: T | null; error: ApiFetchError | null }> {
+    const maxRetries = options.maxRetries ?? 2;
+    const url = `${GITHUB_API_BASE}${endpoint}`;
+
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        const response = await fetch(url, {
+          headers: this.getHeaders(),
+        });
+
+        // Always update tracker from response headers
+        rateLimitTracker.updateFromHeaders(response.headers);
+
+        // 1. Handle HTTP 401: Invalid / Expired Token
+        if (response.status === 401) {
+          return {
+            data: null,
+            error: {
+              endpoint,
+              status: 401,
+              errorType: 'bad_credentials',
+              message: 'Invalid or expired GitHub Personal Access Token. Please verify or clear your token in Settings.',
+            },
+          };
+        }
+
+        // 2. Handle HTTP 403 / 429: Rate limits and permissions
+        if (response.status === 403 || response.status === 429) {
+          let bodyMessage = '';
+          try {
+            const body = await response.json();
+            bodyMessage = body?.message || '';
+          } catch {
+            // Ignore parse errors
+          }
+
+          const remaining = response.headers.get('x-ratelimit-remaining');
+          const resetHeader = response.headers.get('x-ratelimit-reset');
+          const retryAfterHeader = response.headers.get('retry-after');
+          const resetTime = resetHeader ? parseInt(resetHeader, 10) : undefined;
+          const retryAfterSec = retryAfterHeader ? parseInt(retryAfterHeader, 10) : undefined;
+
+          const isSecondary =
+            response.status === 429 ||
+            /secondary rate limit|abuse detection/i.test(bodyMessage) ||
+            !!retryAfterSec;
+
+          const isPrimaryRateLimit =
+            !isSecondary &&
+            (remaining === '0' || /rate limit exceeded/i.test(bodyMessage));
+
+          if (isSecondary) {
+            const waitSec = retryAfterSec || 60;
+            rateLimitTracker.setSecondaryRateLimit(waitSec);
+            return {
+              data: null,
+              error: {
+                endpoint,
+                status: response.status,
+                errorType: 'rate_limit_secondary',
+                message: `GitHub API secondary rate limit triggered. Please wait ~${waitSec} seconds before retrying.`,
+                isRateLimit: true,
+                isSecondaryRateLimit: true,
+                retryAfter: waitSec,
+                rateLimitReset: resetTime,
+              },
+            };
+          }
+
+          if (isPrimaryRateLimit) {
+            const limit = response.headers.get('x-ratelimit-limit') || (this.customToken ? '5,000' : '60');
+            rateLimitTracker.setExhausted(resetTime, parseInt(limit, 10) || undefined);
+            const resetMin = resetTime ? Math.max(1, Math.ceil((resetTime - Math.floor(Date.now() / 1000)) / 60)) : 60;
+            const resetDate = resetTime ? new Date(resetTime * 1000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : 'in an hour';
+
+            return {
+              data: null,
+              error: {
+                endpoint,
+                status: 403,
+                errorType: 'rate_limit_primary',
+                message: this.customToken
+                  ? `GitHub API authenticated rate limit reached (${limit} requests/hr). Quota resets in ~${resetMin} min (at ${resetDate}).`
+                  : `GitHub API unauthenticated rate limit reached (60 requests/hr). Quota resets in ~${resetMin} min (at ${resetDate}). Add an optional Personal Access Token in Settings for 5,000 requests/hr.`,
+                isRateLimit: true,
+                rateLimitReset: resetTime,
+              },
+            };
+          }
+
+          // Non-rate-limit 403 (SAML enforcement, private repo permission, etc.)
+          return {
+            data: null,
+            error: {
+              endpoint,
+              status: 403,
+              errorType: 'forbidden',
+              message: bodyMessage ? `Access forbidden by GitHub API: ${bodyMessage}` : 'Access forbidden by GitHub API. You may lack permission to view this resource.',
+              isRateLimit: false,
+            },
+          };
+        }
+
+        // 3. Handle HTTP 404: Not Found
+        if (response.status === 404) {
+          if (options.allowNotFound) {
+            return { data: null, error: null };
+          }
+          return {
+            data: null,
+            error: {
+              endpoint,
+              status: 404,
+              errorType: 'not_found',
+              message: 'Resource not found or private repository.',
+            },
+          };
+        }
+
+        // 4. Handle HTTP 5xx Server Errors (eligible for bounded retry)
+        if (response.status >= 500) {
+          if (attempt < maxRetries) {
+            const delay = Math.min(1500, 300 * Math.pow(2, attempt) + Math.random() * 100);
+            await new Promise((res) => setTimeout(res, delay));
+            continue;
+          }
+          return {
+            data: null,
+            error: {
+              endpoint,
+              status: response.status,
+              errorType: 'server_error',
+              message: `GitHub API server error (${response.status} ${response.statusText}). Please try again shortly.`,
+            },
+          };
+        }
+
+        // 5. Other non-2xx client errors (400, 422, etc.)
+        if (!response.ok) {
+          let msg = `GitHub API error: ${response.status} ${response.statusText}`;
+          try {
+            const errBody = await response.json();
+            if (errBody?.message) {
+              msg = errBody.message;
+            }
+          } catch {
+            // Ignore JSON parse error
+          }
+          return {
+            data: null,
+            error: {
+              endpoint,
+              status: response.status,
+              errorType: 'general',
+              message: msg,
+            },
+          };
+        }
+
+        // 6. Successful 2xx response
+        const json = await response.json();
+        return { data: json as T, error: null };
+      } catch (err: unknown) {
+        // Network or fetch error (offline, DNS, timeout)
+        if (attempt < maxRetries) {
+          const delay = Math.min(1500, 300 * Math.pow(2, attempt) + Math.random() * 100);
+          await new Promise((res) => setTimeout(res, delay));
+          continue;
+        }
+
+        const message = err instanceof Error ? err.message : 'Network error connecting to GitHub API.';
+        return {
+          data: null,
+          error: {
+            endpoint,
+            status: 0,
+            errorType: 'network_error',
+            message: `Network error connecting to GitHub API: ${message}`,
+          },
+        };
+      }
+    }
+
+    return {
+      data: null,
+      error: {
+        endpoint,
+        status: 0,
+        errorType: 'network_error',
+        message: 'Request failed after maximum retry attempts.',
+      },
+    };
+  }
+
+  /**
+   * Check rate limit proactively using GET /rate_limit.
+   * This endpoint DOES NOT consume rate-limit quota!
+   */
+  public async checkRateLimit(): Promise<{ state: RateLimitState; error: ApiFetchError | null }> {
+    try {
+      const response = await fetch(`${GITHUB_API_BASE}/rate_limit`, {
+        headers: this.getHeaders(),
+      });
+
+      rateLimitTracker.updateFromHeaders(response.headers);
+
+      if (response.status === 401) {
+        return {
+          state: rateLimitTracker.getState(),
+          error: {
+            endpoint: '/rate_limit',
+            status: 401,
+            errorType: 'bad_credentials',
+            message: 'Invalid or expired GitHub Personal Access Token.',
+          },
+        };
+      }
+
+      if (response.ok) {
+        const json = await response.json();
+        if (json?.resources?.core) {
+          const core = json.resources.core;
+          // Update tracker with full core details
+          const headers = new Headers({
+            'x-ratelimit-limit': String(core.limit),
+            'x-ratelimit-remaining': String(core.remaining),
+            'x-ratelimit-reset': String(core.reset),
+            'x-ratelimit-used': String(core.used),
+          });
+          rateLimitTracker.updateFromHeaders(headers);
+        }
+        return { state: rateLimitTracker.getState(), error: null };
+      }
+
+      return {
+        state: rateLimitTracker.getState(),
+        error: {
+          endpoint: '/rate_limit',
+          status: response.status,
+          errorType: 'general',
+          message: `Failed to check rate limit: ${response.status}`,
+        },
+      };
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Network failure checking rate limit';
+      return {
+        state: rateLimitTracker.getState(),
+        error: {
+          endpoint: '/rate_limit',
           status: 0,
+          errorType: 'network_error',
           message,
         },
       };
@@ -136,6 +372,11 @@ export class GitHubApiService {
     repo: string,
     onProgress?: (stage: string, detail?: string) => void
   ): Promise<{ data: RawAnalysisData; errors: ApiFetchError[] }> {
+    // 0. Initial fast-fail if rate limit is already exhausted
+    if (rateLimitTracker.isRateLimited()) {
+      throw new Error(rateLimitTracker.getHumanResetMessage());
+    }
+
     const cacheKey = `${owner.toLowerCase()}/${repo.toLowerCase()}`;
     const cached = sessionCache.get<RawAnalysisData>(cacheKey);
     if (cached) {
@@ -145,10 +386,26 @@ export class GitHubApiService {
 
     const apiErrors: ApiFetchError[] = [];
 
+    // Helper to check for rate limit aborts during pipeline
+    const checkForRateLimitAbort = (res: { error: ApiFetchError | null }) => {
+      if (res.error?.isRateLimit) {
+        throw new Error(res.error.message);
+      }
+    };
+
     // Stage 1: Repo metadata
     onProgress?.('fetching_meta', `Fetching ${owner}/${repo} metadata...`);
     const repoRes = await this.request<GitHubRepo>(`/repos/${owner}/${repo}`);
     if (repoRes.error || !repoRes.data) {
+      if (repoRes.error?.isRateLimit) {
+        throw new Error(repoRes.error.message);
+      }
+      if (repoRes.error?.errorType === 'bad_credentials') {
+        throw new Error(repoRes.error.message);
+      }
+      if (repoRes.error?.status === 404) {
+        throw new Error(`Repository "${owner}/${repo}" was not found or is private. RepoHealth requires a public repository.`);
+      }
       throw new Error(
         repoRes.error?.message || `Failed to access repository ${owner}/${repo}`
       );
@@ -161,6 +418,7 @@ export class GitHubApiService {
       `/repos/${owner}/${repo}/languages`,
       { allowNotFound: true }
     );
+    checkForRateLimitAbort(langRes);
     if (langRes.error) apiErrors.push(langRes.error);
     const languages = langRes.data || {};
 
@@ -174,6 +432,8 @@ export class GitHubApiService {
         allowNotFound: true,
       }),
     ]);
+    checkForRateLimitAbort(readmeRes);
+    checkForRateLimitAbort(licenseRes);
     if (readmeRes.error) apiErrors.push(readmeRes.error);
     if (licenseRes.error) apiErrors.push(licenseRes.error);
 
@@ -199,6 +459,8 @@ export class GitHubApiService {
         { allowNotFound: true }
       ),
     ]);
+    checkForRateLimitAbort(workflowsRes);
+    checkForRateLimitAbort(runsRes);
     if (workflowsRes.error) apiErrors.push(workflowsRes.error);
     if (runsRes.error) apiErrors.push(runsRes.error);
 
@@ -215,6 +477,8 @@ export class GitHubApiService {
         allowNotFound: true,
       }),
     ]);
+    checkForRateLimitAbort(releasesRes);
+    checkForRateLimitAbort(tagsRes);
     if (releasesRes.error) apiErrors.push(releasesRes.error);
     if (tagsRes.error) apiErrors.push(tagsRes.error);
 
@@ -240,6 +504,10 @@ export class GitHubApiService {
         { allowNotFound: true }
       ),
     ]);
+    checkForRateLimitAbort(commitsRes);
+    checkForRateLimitAbort(contributorsRes);
+    checkForRateLimitAbort(contentsRes);
+    checkForRateLimitAbort(treeRes);
     if (commitsRes.error) apiErrors.push(commitsRes.error);
     if (contributorsRes.error) apiErrors.push(contributorsRes.error);
     if (contentsRes.error) apiErrors.push(contentsRes.error);
@@ -274,6 +542,7 @@ export class GitHubApiService {
         `/repos/${owner}/${repo}/contents/package.json`,
         { allowNotFound: true }
       );
+      checkForRateLimitAbort(pRes);
       if (pRes.data?.content) {
         try {
           const decoded = safeBase64Decode(pRes.data.content);
@@ -290,6 +559,7 @@ export class GitHubApiService {
         `/repos/${owner}/${repo}/contents/pyproject.toml`,
         { allowNotFound: true }
       );
+      checkForRateLimitAbort(pyRes);
       if (pyRes.data?.content) {
         manifestContents.pyprojectToml = safeBase64Decode(pyRes.data.content);
       }
@@ -301,6 +571,7 @@ export class GitHubApiService {
         `/repos/${owner}/${repo}/contents/Cargo.toml`,
         { allowNotFound: true }
       );
+      checkForRateLimitAbort(cRes);
       if (cRes.data?.content) {
         manifestContents.cargoToml = safeBase64Decode(cRes.data.content);
       }
@@ -312,6 +583,7 @@ export class GitHubApiService {
         `/repos/${owner}/${repo}/contents/go.mod`,
         { allowNotFound: true }
       );
+      checkForRateLimitAbort(gRes);
       if (gRes.data?.content) {
         manifestContents.goMod = safeBase64Decode(gRes.data.content);
       }
@@ -323,6 +595,7 @@ export class GitHubApiService {
         `/repos/${owner}/${repo}/contents/Dockerfile`,
         { allowNotFound: true }
       );
+      checkForRateLimitAbort(dRes);
       if (dRes.data?.content) {
         manifestContents.dockerfile = safeBase64Decode(dRes.data.content);
       }

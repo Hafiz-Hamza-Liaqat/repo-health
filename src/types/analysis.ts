@@ -33,12 +33,25 @@ export interface ScanProgressStage {
   detail?: string;
 }
 
+export type ApiErrorType =
+  | 'rate_limit_primary'
+  | 'rate_limit_secondary'
+  | 'bad_credentials'
+  | 'forbidden'
+  | 'not_found'
+  | 'server_error'
+  | 'network_error'
+  | 'general';
+
 export interface ApiFetchError {
   endpoint: string;
   status: number;
   message: string;
+  errorType?: ApiErrorType;
   isRateLimit?: boolean;
+  isSecondaryRateLimit?: boolean;
   rateLimitReset?: number;
+  retryAfter?: number;
 }
 
 export interface ProvenanceSignals {

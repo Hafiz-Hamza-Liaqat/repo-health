@@ -1,6 +1,30 @@
 import { test, expect } from '@playwright/test';
 
 test.describe('RepoHealth End-to-End User Journey', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.route('https://api.github.com/rate_limit', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        headers: {
+          'x-ratelimit-remaining': '60',
+          'x-ratelimit-limit': '60',
+          'x-ratelimit-reset': String(Math.floor(Date.now() / 1000) + 3600),
+        },
+        body: JSON.stringify({
+          resources: {
+            core: {
+              limit: 60,
+              remaining: 60,
+              reset: Math.floor(Date.now() / 1000) + 3600,
+              used: 0,
+            },
+          },
+        }),
+      });
+    });
+  });
+
   test('should display home page, validation states, and example repositories', async ({ page }) => {
     await page.goto('/');
 
@@ -49,6 +73,10 @@ test.describe('RepoHealth End-to-End User Journey', () => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
+        headers: {
+          'x-ratelimit-remaining': '60',
+          'x-ratelimit-limit': '60',
+        },
         body: JSON.stringify({
           id: 999111,
           name: 'mock-repo',
@@ -188,7 +216,7 @@ test.describe('RepoHealth End-to-End User Journey', () => {
       });
     });
 
-    await page.route('https://api.github.com/repos/mock-org/mock-repo/git/trees*', async (route) => {
+    await page.route(/git\/trees/, async (route) => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',

@@ -14,6 +14,8 @@ export const Header: React.FC<HeaderProps> = ({ onOpenSettings, onReset }) => {
     return rateLimitTracker.subscribe(setRateLimit);
   }, []);
 
+  const isRateLimited = rateLimitTracker.isRateLimited();
+
   return (
     <header className="border-b border-slate-800/80 bg-slate-900/60 backdrop-blur-md sticky top-0 z-40 transition-colors">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
@@ -43,19 +45,26 @@ export const Header: React.FC<HeaderProps> = ({ onOpenSettings, onReset }) => {
           {/* Rate limit status pill */}
           <button
             onClick={onOpenSettings}
-            className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-slate-700/80 bg-slate-800/60 hover:bg-slate-800 hover:border-slate-600 text-slate-300 transition-colors"
-            title="Configure GitHub API and check rate limits"
+            aria-label="GitHub API Settings"
+            className={`flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border transition-colors ${
+              isRateLimited
+                ? 'border-rose-700/80 bg-rose-950/50 hover:bg-rose-900/60 text-rose-300'
+                : 'border-slate-700/80 bg-slate-800/60 hover:bg-slate-800 hover:border-slate-600 text-slate-300'
+            }`}
+            title={isRateLimited ? rateLimitTracker.getHumanResetMessage() : 'Configure GitHub API and check rate limits'}
           >
             <div
               className={`w-2 h-2 rounded-full ${
-                rateLimit.remaining < 10
+                isRateLimited || rateLimit.remaining < 10
                   ? 'bg-rose-400 animate-pulse'
                   : rateLimit.remaining < 25
                   ? 'bg-amber-400'
                   : 'bg-emerald-400'
               }`}
             />
-            <span className="font-mono">{rateLimit.remaining} reqs left</span>
+            <span className="font-mono">
+              {isRateLimited ? '0 reqs left' : `${rateLimit.remaining} reqs left`}
+            </span>
             <Key className="w-3.5 h-3.5 text-slate-400 ml-0.5" />
           </button>
 

@@ -17,12 +17,13 @@ import { PrintReport } from './components/print/PrintReport';
 
 import { githubApi } from './services/githubApi';
 import { sessionCache } from './services/cache';
+import { rateLimitTracker, RateLimitState } from './services/rateLimit';
 import { runAllAnalyzers } from './analyzers';
 import { generateReport } from './engine/reportGenerator';
 import { AnalysisOutcome } from './types/analysis';
 import { RepoHealthReport } from './types/report';
 import { ScoringPerspectiveKey } from './types/scoring';
-import { AlertCircle, RotateCcw, Key } from 'lucide-react';
+import { AlertCircle, RotateCcw, Key, Clock, ShieldAlert, WifiOff } from 'lucide-react';
 
 export function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -32,18 +33,50 @@ export function App() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const [activeRepo, setActiveRepo] = useState<{ owner: string; repo: string } | null>(null);
+  const [lastSubmittedUrl, setLastSubmittedUrl] = useState<string>('');
   const [analysisOutcome, setAnalysisOutcome] = useState<AnalysisOutcome | null>(null);
   const [activePerspective, setActivePerspective] = useState<ScoringPerspectiveKey>('balanced');
   const [report, setReport] = useState<RepoHealthReport | null>(null);
+  const [rateLimit, setRateLimit] = useState<RateLimitState>(rateLimitTracker.getState());
+
+  useEffect(() => {
+    return rateLimitTracker.subscribe((state) => {
+      setRateLimit(state);
+      // Clear rate-limit error banner if quota recovers (via timer or token update)
+      if (!rateLimitTracker.isRateLimited()) {
+        setErrorMsg((prev) => {
+          if (!prev) return null;
+          return /rate limit|quota/i.test(prev) ? null : prev;
+        });
+      }
+    });
+  }, []);
+
+  // Interval ticker when rate limited to update live error countdown
+  useEffect(() => {
+    if (!rateLimitTracker.isRateLimited()) return;
+    const interval = setInterval(() => {
+      setRateLimit(rateLimitTracker.getState());
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [rateLimit.remaining, rateLimit.isSecondaryLimit]);
 
   const executeScan = useCallback(async (owner: string, repo: string, forceFresh = false) => {
+    setActiveRepo({ owner, repo });
+    setLastSubmittedUrl(`${owner}/${repo}`);
+
+    const isRateLimited = rateLimitTracker.isRateLimited();
+    if (isRateLimited) {
+      setErrorMsg(rateLimitTracker.getHumanResetMessage());
+      return;
+    }
+
     if (forceFresh) {
       sessionCache.delete(`${owner.toLowerCase()}/${repo.toLowerCase()}`);
     }
 
     setIsLoading(true);
     setErrorMsg(null);
-    setActiveRepo({ owner, repo });
     setProgressStage('fetching_meta');
     setProgressDetail(`Connecting to GitHub API for ${owner}/${repo}...`);
 
@@ -109,14 +142,34 @@ export function App() {
     setActivePerspective(key);
   };
 
+  const handleTokenSaved = useCallback(() => {
+    // When a valid token is saved and rate-limit tracker confirms requests can proceed
+    if (!rateLimitTracker.isRateLimited()) {
+      // Clear rate-limit error banner while preserving unrelated errors (e.g. 404, server errors)
+      setErrorMsg((prev) => {
+        if (!prev) return null;
+        const isRateLimitError = /rate limit|quota/i.test(prev);
+        return isRateLimitError ? null : prev;
+      });
+    }
+  }, []);
+
   const handleRescan = () => {
-    if (activeRepo) {
-      executeScan(activeRepo.owner, activeRepo.repo, true);
+    if (!rateLimitTracker.isRateLimited()) {
+      if (activeRepo) {
+        executeScan(activeRepo.owner, activeRepo.repo, true);
+      } else if (lastSubmittedUrl && lastSubmittedUrl.includes('/')) {
+        const [owner, repo] = lastSubmittedUrl.split('/');
+        if (owner && repo) {
+          executeScan(owner, repo, true);
+        }
+      }
     }
   };
 
   const handleReset = () => {
     setActiveRepo(null);
+    setLastSubmittedUrl('');
     setAnalysisOutcome(null);
     setReport(null);
     setErrorMsg(null);
@@ -126,6 +179,10 @@ export function App() {
       // Ignore
     }
   };
+
+  const isRateLimited = rateLimitTracker.isRateLimited();
+  const isBadCredentials = errorMsg ? /bad credentials|invalid or expired/i.test(errorMsg) : false;
+  const isNetworkFailure = errorMsg ? /network error|connection/i.test(errorMsg) : false;
 
   return (
     <div className="min-h-screen flex flex-col bg-slate-950 text-slate-100">
@@ -149,12 +206,13 @@ export function App() {
             </div>
           )}
 
-          {/* Scan Input Form (Hidden during active scan if results present) */}
+          {/* Scan Input Form (Always visible when report is null or loading) */}
           {(!report || isLoading) && (
             <ScanForm
               onScan={(owner, repo) => executeScan(owner, repo)}
               isLoading={isLoading}
-              initialValue={activeRepo ? `${activeRepo.owner}/${activeRepo.repo}` : ''}
+              initialValue={lastSubmittedUrl || (activeRepo ? `${activeRepo.owner}/${activeRepo.repo}` : '')}
+              onOpenSettings={() => setIsSettingsOpen(true)}
             />
           )}
 
@@ -166,13 +224,29 @@ export function App() {
             />
           )}
 
-          {/* Error Alert */}
+          {/* Error Alert with Differentiated Statuses */}
           {errorMsg && !isLoading && (
             <div className="max-w-2xl mx-auto p-5 bg-rose-950/60 border border-rose-800 rounded-xl shadow-lg space-y-3 animate-fadeIn">
               <div className="flex items-start gap-3 text-rose-300">
-                <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
+                {isRateLimited ? (
+                  <Clock className="w-5 h-5 shrink-0 mt-0.5 text-rose-400" />
+                ) : isBadCredentials ? (
+                  <ShieldAlert className="w-5 h-5 shrink-0 mt-0.5 text-amber-400" />
+                ) : isNetworkFailure ? (
+                  <WifiOff className="w-5 h-5 shrink-0 mt-0.5 text-rose-400" />
+                ) : (
+                  <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
+                )}
                 <div className="space-y-1">
-                  <h4 className="text-sm font-bold text-white">Analysis Could Not Complete</h4>
+                  <h4 className="text-sm font-bold text-white">
+                    {isRateLimited
+                      ? 'GitHub API Rate Limit Reached'
+                      : isBadCredentials
+                      ? 'Invalid Personal Access Token'
+                      : isNetworkFailure
+                      ? 'Network Connection Failed'
+                      : 'Analysis Could Not Complete'}
+                  </h4>
                   <p className="text-xs text-rose-200 leading-relaxed">{errorMsg}</p>
                 </div>
               </div>
@@ -181,18 +255,27 @@ export function App() {
                 <button
                   type="button"
                   onClick={() => handleRescan()}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium text-white bg-rose-700 hover:bg-rose-600 transition-colors"
+                  disabled={isRateLimited}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium text-white bg-rose-700 hover:bg-rose-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                 >
                   <RotateCcw className="w-3.5 h-3.5" />
-                  <span>Try Again</span>
+                  <span>
+                    {isRateLimited
+                      ? `Try Again (in ~${rateLimitTracker.getMinutesUntilReset()}m)`
+                      : 'Try Again'}
+                  </span>
                 </button>
                 <button
                   type="button"
                   onClick={() => setIsSettingsOpen(true)}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-rose-300 hover:text-white bg-rose-900/50 hover:bg-rose-900 border border-rose-800 transition-colors"
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium border transition-colors ${
+                    isRateLimited || isBadCredentials
+                      ? 'text-white bg-emerald-600 hover:bg-emerald-500 border-emerald-500 shadow-sm'
+                      : 'text-rose-300 hover:text-white bg-rose-900/50 hover:bg-rose-900 border-rose-800'
+                  }`}
                 >
                   <Key className="w-3.5 h-3.5" />
-                  <span>Configure API Token</span>
+                  <span>{isBadCredentials ? 'Fix Token in Settings' : 'Configure API Token (5,000 req/hr)'}</span>
                 </button>
               </div>
             </div>
@@ -251,6 +334,7 @@ export function App() {
       <ApiSettingsModal
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
+        onTokenSaved={handleTokenSaved}
       />
     </div>
   );
