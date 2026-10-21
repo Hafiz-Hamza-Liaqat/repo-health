@@ -393,4 +393,82 @@ describe('App Integration', () => {
     // Verify 404 error banner is preserved
     expect(screen.getByText(/Resource not found or private repository/i)).toBeInTheDocument();
   });
+
+  it('renders Security & Supply-Chain Hygiene card with workflow coverage and interactive filters', async () => {
+    vi.spyOn(githubApi, 'fetchCompleteRepositoryData').mockResolvedValue({
+      data: {
+        ...mockRawAnalysisData,
+        workflowSecurityReport: {
+          assessments: [
+            {
+              filePath: '.github/workflows/ci.yml',
+              workflowName: 'CI',
+              parseSuccess: true,
+              findings: [
+                {
+                  id: 'WFL-01-pass',
+                  ruleId: 'WFL-01',
+                  title: 'Minimal Workflow Permissions Configured',
+                  status: 'pass',
+                  severity: 'info',
+                  explanation: 'Workflow declares contents: read permissions.',
+                  evidence: { label: 'Permissions', value: 'contents: read' },
+                },
+                {
+                  id: 'WFL-04-na',
+                  ruleId: 'WFL-04',
+                  title: 'pull_request_target Pattern Not Applicable',
+                  status: 'not_applicable',
+                  severity: 'info',
+                  explanation: 'Workflow does not trigger on pull_request_target.',
+                },
+              ],
+              summary: { passCount: 1, warningCount: 0, issueCount: 0, unknownCount: 0, notApplicableCount: 1 },
+            },
+          ],
+          retrieval: {
+            retrievedWorkflows: [{ path: '.github/workflows/ci.yml', content: 'name: CI\non: push', byteLength: 20 }],
+            skippedWorkflows: [],
+            summary: { discoveredCount: 1, selectedCount: 1, retrievedCount: 1, skippedCount: 0, failedCount: 0, totalBytesRetrieved: 20 },
+            coverage: 'complete',
+            coverageNotes: ['1 workflow retrieved within budgets.'],
+            errors: [],
+          },
+          overallCoverage: 'complete',
+          summary: { totalWorkflowsDiscovered: 1, totalWorkflowsAnalyzed: 1, totalWorkflowsSkipped: 0, passCount: 1, warningCount: 0, issueCount: 0, unknownCount: 0, notApplicableCount: 1 },
+        },
+      },
+      errors: [],
+    });
+
+    render(<App />);
+
+    const input = screen.getByPlaceholderText(/Paste public GitHub repository URL/i);
+    const submitBtn = screen.getByRole('button', { name: /Analyze/i });
+
+    await act(async () => {
+      fireEvent.change(input, { target: { value: 'https://github.com/acme-corp/sample-project' } });
+      fireEvent.click(submitBtn);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('Security & Supply-Chain Hygiene')).toBeInTheDocument();
+    });
+
+    // Check workflow coverage banner is visible
+    expect(screen.getByText('GitHub Actions Workflow Security Coverage')).toBeInTheDocument();
+    expect(screen.getByText('COMPLETE COVERAGE')).toBeInTheDocument();
+
+    // Check filter buttons exist and work
+    expect(screen.getByRole('button', { name: /All \(/i })).toBeInTheDocument();
+    const naFilterBtn = screen.getByRole('button', { name: /N\/A \(/i });
+    expect(naFilterBtn).toBeInTheDocument();
+
+    // Filter to N/A
+    await act(async () => {
+      fireEvent.click(naFilterBtn);
+    });
+
+    expect(screen.getAllByText(/pull_request_target Pattern Not Applicable/i).length).toBeGreaterThan(0);
+  });
 });

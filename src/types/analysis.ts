@@ -13,6 +13,7 @@ import {
 import { Finding } from './scoring';
 import { DetectedTechnology } from './technology';
 import { SecurityHygieneAssessment } from './security';
+import type { WorkflowSecurityAnalysisReport } from '../services/githubApi';
 
 export type ScanStatus =
   | 'idle'
@@ -119,6 +120,7 @@ export interface RawAnalysisData {
     dockerfile?: string;
   };
   apiErrors: ApiFetchError[];
+  workflowSecurityReport?: WorkflowSecurityAnalysisReport;
 }
 
 export interface AnalysisOutcome {

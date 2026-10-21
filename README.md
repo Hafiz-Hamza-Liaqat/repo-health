@@ -3,7 +3,7 @@
 **Tagline:** *Evaluate code. Verify evidence. Make better hiring decisions.*  
 **GitHub Repository:** [repo-health](https://github.com/Hafiz-Hamza-Liaqat/repo-health)
 
-**Product Version:** `2.0.0 (Phase 2 Portfolio Readiness & GitHub Pages Deployment)`
+**Product Version:** `2.1.0 (Phase 2.1 Security & Supply-Chain Hygiene with Bounded GitHub Actions Workflow Analysis)`
 
 **License:** [MIT](LICENSE)
 
@@ -15,7 +15,7 @@
 
 RepoHealth is a professional GitHub repository health and developer evidence analyzer. It helps companies, technical recruiters, hiring managers, agencies, clients, and engineering teams assess public GitHub repositories using verifiable evidence.
 
-Rather than relying on popularity metrics (such as GitHub stars, forks, or superficial follower counts) or assuming that code is high quality simply because a repository has a README, RepoHealth performs deterministic analysis across six core engineering categories:
+Rather than relying on popularity metrics (such as GitHub stars, forks, or superficial follower counts) or assuming that code is high quality simply because a repository has a README, RepoHealth performs deterministic analysis across six core engineering categories plus an independent diagnostic security & supply-chain hygiene audit:
 
 - **Documentation Depth:** Detects project purpose, setup instructions, web-application user workflows supported by verified repository screenshots or library code usage examples, testing guidance, and live deployment links via an ATX heading parser stripping leading numbering and punctuation without false warnings.
 - **License Compliance:** Identifies standard SPDX licenses, standalone root `LICENSE` documents, and unambiguous commercial distribution rights.
@@ -25,6 +25,7 @@ Rather than relying on popularity metrics (such as GitHub stars, forks, or super
 - **Repository Metadata:** Evaluates description clarity, topic discovery, default branch hygiene, and maintenance recency, cross-validating `size: 0 KB` with active content to eliminate false empty-repository warnings.
 - **Technology Stack Detection:** Discovers frameworks, runtimes, and libraries across Languages, Frontend, Backend, Databases, DevOps, and Testing with confidence levels (`strongly_evidenced`, `detected`, `config_or_dependency_only`, `inferred`).
 - **Defensible Provenance Signals:** Analyzes contributor distribution, bot activity (Dependabot, Renovate), and explicit AI tooling artifacts (`.cursorrules`, Copilot instructions) without speculative AI-authorship claims.
+- **Security & Supply-Chain Hygiene:** Detects dedicated security policies (`SECURITY.md`), automated vulnerability management (Dependabot, Renovate, CodeQL, Snyk), sensitive artifact exposure (`.env`, private keys, credential artifacts), binary blob / archive commits, and evaluates GitHub Actions workflow security (least-privilege permissions, SHA action pinning, script injection expression hazards, and risky `pull_request_target` execution patterns) with exact source coordinates and safe retrieval budgets.
 
 RepoHealth values demonstrable engineering practices. Scores are transparent, reproducible, and explainable.
 
@@ -62,6 +63,8 @@ RepoHealth provides a transparent, client-side evaluation workflow:
    - Recursive Test Discovery via Git Trees API
    - Releases, Tags & Version Recency
    - Technology Stack & Provenance Synthesis
+   - Security Policies, Supply-Chain Scanning & Artifact Hygiene
+   - Bounded GitHub Actions Workflow Retrieval & Security Analysis
 3. **Switch Between Assessment Perspectives:**
    Tailor the evaluation to your specific review context by toggling among three dynamic scoring perspectives:
    - **Balanced Repository Quality:** Balanced holistic evaluation across all 6 core categories (base 100 points).
@@ -69,11 +72,12 @@ RepoHealth provides a transparent, client-side evaluation workflow:
    - **Presentation & Professionalism:** Emphasizes developer onboarding, shifting **70% of total weight** to Documentation (30 pts), Licensing (25 pts), and Metadata (15 pts).
 4. **Inspect Category Scores, Evidence-Backed Findings, and Recommendations:**
    - Review overall letter grade (A+ through F) and normalized score gauges.
-   - Filter findings by status (**Pass**, **Warning**, **Issue**, **Not Detected**, **Unknown**) across all six categories.
+   - Filter findings by status (**All**, **Issues/Warnings**, **Pass**, **Not Detected**, **Indeterminate**, **N/A**) across all categories and the dedicated Security & Supply-Chain Hygiene card.
    - Inspect detected technologies and confidence levels.
    - Review prioritized remediation items grouped by severity (High, Medium, Low).
+   - Inspect exact source coordinates (`sourcePath:line:col`) for workflow security findings and review retrieval coverage (`complete`, `partial`, `unknown`).
 5. **Export the Findings as JSON or Print/Save as PDF:**
-   - Click **Export JSON** to download the complete versioned `RepoHealthReport_v1.1` specification.
+   - Click **Export JSON** to download the complete versioned `RepoHealthReport_v1.1` specification (including structured `securityHygiene` and `workflowCoverage`).
    - Click **Copy Summary** to place a formatted Markdown summary on your clipboard.
    - Click **Print / PDF** to trigger the browser print dialog with dedicated print stylesheets that strip all navigation controls, forms, and interactive buttons for a clean executive summary report.
 
@@ -84,12 +88,27 @@ RepoHealth provides a transparent, client-side evaluation workflow:
 ## 4. Key Features
 
 - **Zero-Authentication Public Scans:** Evaluates public repositories immediately without requiring GitHub login, server-side database, or private credentials.
-- **Real-Time Step-by-Step Progress:** Visual progress tracker representing genuine network stages (Metadata → Documentation → CI/CD → Tests → Releases → Technology Synthesis).
-- **Independent Deterministic Scoring Engine:** Decoupled calculation logic with 6 assessment categories, stable rule identifiers (`DOC-01`–`DOC-06`, `LIC-01`–`LIC-03`, `CI-01`–`CI-03`, `TST-01`–`TST-04`, `REL-01`–`REL-03`, `META-01`–`META-05`), and zero synthetic points.
+- **Real-Time Step-by-Step Progress:** Visual progress tracker representing genuine network stages (Metadata → Documentation → CI/CD → Tests → Releases → Technology Synthesis → Security & Supply-Chain Hygiene → Bounded Workflow Security).
+- **Independent Deterministic Scoring Engine:** Decoupled calculation logic with 6 baseline assessment categories totaling 100 points, stable rule identifiers (`DOC-01`–`DOC-06`, `LIC-01`–`LIC-03`, `CI-01`–`CI-03`, `TST-01`–`TST-04`, `REL-01`–`REL-03`, `META-01`–`META-05`), and zero synthetic points.
+- **Dedicated Security & Supply-Chain Hygiene Audit:** Independent diagnostic card with 8 standardized rules (`SEC-01` to `SEC-04` path heuristics, `WFL-01` to `WFL-04` static workflow rules) that inform actionable recommendations without distorting the 100-point core score.
+- **Bounded GitHub Actions Workflow Retrieval:** Browser-side workflow retrieval safely bounded by:
+  - Max 10 workflow files discovered via Git Tree.
+  - Max 256 KiB (`262,144` UTF-8 bytes) per workflow file with early character-length rejection.
+  - Max 1 MiB aggregate workflow retrieval budget with pessimistic capacity reservations.
+  - Max 512 KiB transport response guard.
+  - Rate-limit quota check (aborts retrieval if quota is insufficient).
+  - Bounded retries and strict `AbortController` cancellation.
+- **AST-Backed Browser YAML Parser:** Pure TypeScript parser built on `yaml` with zero Node.js `Buffer` dependency, extracting concrete syntax tree nodes and pinpointing exact line and column coordinates for every security finding.
+- **Static Workflow Security Rules (WFL-01 to WFL-04):**
+  - `WFL-01`: Top-level and job-level least-privilege `permissions` configuration.
+  - `WFL-02`: Full 40-character commit SHA pinning for third-party actions and reusable workflows.
+  - `WFL-03`: Untrusted script-expression injection vectors in `run:` steps (e.g., `github.event.issue.title`).
+  - `WFL-04`: Risky `pull_request_target` triggers combined with checkout or untrusted script execution.
+- **Comprehensive Finding Status Accounting:** Reconciles all 6 finding statuses (**Pass**, **Warning**, **Issue**, **Not Detected**, **Indeterminate**, **Not Applicable**) across UI filters, dashboard cards, print reports, and exported data.
+- **Defensible Workflow Coverage Semantics:** Surfaces structured retrieval status (`complete`, `partial`, `unknown`) so reviewers know whether all workflows were evaluated or if budget caps limited retrieval.
 - **Three Dynamic Assessment Perspectives:** Balanced Repository Quality, Engineering Evidence, and Presentation & Professionalism.
 - **Transparent Denominator Normalization:** When an optional category is not applicable, the denominator adjusts proportionally without penalizing the repository.
-- **Comprehensive Finding Status Accounting:** Displays all 5 finding statuses (Pass, Warning, Issue, Not Detected, Unknown) reconciling exactly with total evaluated rules.
-- **Data Coverage Separation:** Explicitly distinguishes endpoint query accounting (e.g. `10/10 responses`) from repository tree coverage completeness and absent optional resources.
+- **Data Coverage Separation:** Explicitly distinguishes endpoint query accounting (e.g. `10/10 responses`) from repository tree coverage completeness and workflow retrieval budgets.
 - **Recursive Test Discovery:** Leverages GitHub's Git Trees API to discover nested test suites (`src/test/`, `src/analyzers/*.test.ts`, etc.) and test runners without requiring a root-level test directory.
 - **Web Application & Library Evidence Recognition:** Recognizes both frontend web applications (workflow steps + verified repository screenshots) and backend/CLI libraries (code usage examples) fairly under `DOC-04`.
 - **Prioritized Action Items:** Actionable recommendations categorized by severity (High, Medium, Low) with direct rationale.
@@ -105,9 +124,10 @@ RepoHealth provides a transparent, client-side evaluation workflow:
 - **Build Tool:** Vite 6 with dual-mode base configuration (local `/` vs. GitHub Pages `/repo-health/`)
 - **Styling:** Tailwind CSS with responsive dark slate theme and custom print stylesheets
 - **Icons:** Lucide React
-- **API Client:** GitHub REST API v3 with rate-limit tracking, session caching, and tree-based recursive queries
+- **YAML Parser:** `yaml` (`^2.9.1`) with visitor-based AST navigation and source coordinate mapping
+- **API Client:** GitHub REST API v3 with rate-limit tracking, session caching, bounded backoff retries, and tree-based recursive queries
 - **Testing:**
-  - **Vitest & React Testing Library:** 85 automated unit, analyzer, engine, service, and component tests across 6 test files
+  - **Vitest & React Testing Library:** 292 automated unit, analyzer, engine, service, component, and integration tests across 11 test files
   - **Playwright:** 3 critical browser end-to-end user workflows across Chromium
 - **Code Quality:** ESLint (`@typescript-eslint`), Prettier, TypeScript compiler (`tsc --noEmit`)
 - **CI/CD:** GitHub Actions workflow executing quality checks and automated deployment to GitHub Pages
@@ -118,9 +138,9 @@ RepoHealth provides a transparent, client-side evaluation workflow:
 
 ```
 src/
-├── types/                # Domain schemas (GitHub, Scoring, Technology, Analysis, Report)
+├── types/                # Domain schemas (GitHub, Scoring, Technology, Analysis, Security, Report)
 ├── config/               # Centralized scoring profiles, stable rule definitions, example repos
-├── services/             # GitHub REST API client, session cache, rate-limit tracker
+├── services/             # GitHub REST API client, session cache, rate-limit tracker, bounded retrieval
 ├── analyzers/            # Modular analyzers
 │   ├── urlParser.ts      # Validates full URLs, shorthand owner/repo, rejects foreign domains
 │   ├── readmeAnalyzer.ts # Evaluates purpose, setup, usage/workflows, screenshots, testing, demos
@@ -130,7 +150,10 @@ src/
 │   ├── releasesAnalyzer.ts # Distinguishes releases with changelogs from raw Git tags
 │   ├── metadataAnalyzer.ts # Evaluates description, topics, default branch, maintenance recency
 │   ├── technologyDetector.ts # Modular tech rules (Languages, Frontend, Backend, DevOps, etc.)
-│   └── provenanceAnalyzer.ts # Contributor distribution, bot activity, explicit AI tooling
+│   ├── provenanceAnalyzer.ts # Contributor distribution, bot activity, explicit AI tooling
+│   ├── securityHygieneAnalyzer.ts # Evaluates SEC-01..04 and orchestrates WFL-01..04
+│   ├── workflowYamlParser.ts      # Browser-safe AST YAML parser with source coordinates
+│   └── workflowSecurityAnalyzer.ts# Static security rules (permissions, pinning, injection, PR target)
 ├── engine/               # Independent business logic
 │   ├── scoringEngine.ts  # Deterministic score calculator, denominator normalization
 │   ├── recommendations.ts# Synthesizes issues and warnings into prioritized action items
@@ -140,7 +163,8 @@ src/
     ├── layout/           # Header, Footer, ApiSettingsModal
     ├── scanner/          # ScanForm, ScanProgress, ExamplePicker
     ├── dashboard/        # DashboardHeader, ScoreOverview, PerspectiveSelector, CategoryCards,
-    │                     # TechnologyBadges, ProvenanceOverview, RecommendationsList, LimitationsNotice
+    │                     # SecurityHygieneCard, TechnologyBadges, ProvenanceOverview,
+    │                     # RecommendationsList, LimitationsNotice
     ├── common/           # Badge, ScoreGauge
     └── print/            # Dedicated print report stylesheet
 ```
@@ -192,7 +216,52 @@ Users can switch assessment perspectives instantly to recalculate the score with
 
 ---
 
-## 8. Setup and Development Commands
+## 8. Security & Supply-Chain Hygiene (Independent Diagnostic Assessment)
+
+In RepoHealth v2.1.0, security and supply-chain hygiene is evaluated as an **independent diagnostic assessment card**. It does not alter the 100-point core score denominator, ensuring strict comparability across repository evaluations while surfacing essential security hygiene signals and prioritized remediation guidance.
+
+### Standardized Rule Definitions
+
+| Rule ID | Name | Method | Findings & Evidence Evaluated |
+| :--- | :--- | :--- | :--- |
+| `SEC-01` | **Security Policy** | Path heuristic | Verifies published vulnerability disclosure policy (`SECURITY.md` in root, `.github/`, or `docs/`). |
+| `SEC-02` | **Vulnerability Scanning** | Path heuristic | Detects automated dependency and security scanning configurations (Dependabot, Renovate, CodeQL, Snyk, Trivy). |
+| `SEC-03` | **Sensitive Artifact Hygiene** | Path heuristic | Scans tracked file trees for committed `.env` files, private keys (`*.pem`, `*.key`, `id_rsa`), credential backups, and tokens. |
+| `SEC-04` | **Binary Artifact Hygiene** | Path heuristic | Identifies checked-in compiled binaries, shared libraries, and archive blobs (`.exe`, `.dll`, `.so`, `.zip`, `.tar.gz`) that should be distributed as release assets. |
+| `WFL-01` | **Workflow Permissions** | Static AST | Enforces least-privilege `permissions` at top-level or job-level to prevent default broad token access. |
+| `WFL-02` | **Action Reference Pinning** | Static AST | Checks that third-party actions and reusable workflows are pinned to full 40-character commit SHAs rather than mutable branches or tags. |
+| `WFL-03` | **Script Injection Defense** | Static AST | Detects direct interpolation of untrusted GitHub context expressions (e.g., `github.event.issue.title`, `github.event.comment.body`) in `run:` script blocks. |
+| `WFL-04` | **Risky PR Target Patterns** | Static AST | Flags dangerous combinations of `pull_request_target` triggers with explicit checkouts of untrusted pull-request HEAD refs or build scripts. |
+
+### Finding Status Accounting
+
+RepoHealth accounts for all 6 distinct finding statuses:
+- **Pass (`✓`):** Evidence verifies adherence to the hygiene rule.
+- **Issue (`✖`):** Confirmed security weakness or anti-pattern detected.
+- **Warning (`⚠`):** Potential risk or suboptimal practice requiring attention.
+- **Not Detected (`⚪`):** Recommended security artifact was not found in the repository.
+- **Indeterminate / Unknown (`❓`):** Ambiguous configuration or partial evidence where automated determination cannot be made definitively.
+- **Not Applicable (`➖`):** Workflow-specific rules evaluated when no workflow files exist or the context does not apply.
+
+### Workflow Retrieval Limits & Coverage Uncertainty
+
+To preserve browser responsiveness and protect GitHub API rate limits, workflow YAML retrieval is governed by explicit resource budgets:
+- **Maximum files analyzed:** 10 workflow YAML files discovered via the Git Tree API.
+- **Maximum file size:** 256 KiB (`262,144` UTF-8 bytes) per file. Larger files are rejected safely prior to YAML parsing using browser-safe `TextEncoder` byte counts.
+- **Aggregate content budget:** 1 MiB aggregate capacity across all retrieved workflows with pessimistic capacity reservation.
+- **Transport response guard:** 512 KiB streaming limit.
+- **Rate-limit protection:** Aborts retrieval if remaining API requests fall below safety thresholds.
+
+Workflow coverage state is explicitly communicated as:
+- `complete`: All discovered workflows were retrieved and analyzed.
+- `partial`: Retrieval was halted due to aggregate budget caps, file size limits, or rate-limit preservation.
+- `unknown`: No workflows exist or retrieval was skipped due to API errors.
+
+> **Heuristic Disclosure:** RepoHealth security rules are bounded static heuristics and structural linters designed to identify common hygiene oversights. They do not constitute formal security audits, dynamic penetration testing, or vulnerability certification.
+
+---
+
+## 9. Setup and Development Commands
 
 ### Prerequisites
 - Node.js `v18+` or `v20+` (tested on Node `v22.21.1`)
@@ -223,7 +292,7 @@ npm run typecheck
 # 2. Lint TypeScript and React source files (zero warnings allowed)
 npm run lint
 
-# 3. Run all unit and integration tests (Vitest: 85 tests across 6 files)
+# 3. Run all unit, analyzer, and integration tests (Vitest: 292 tests across 11 files)
 npm run test
 
 # 4. Run Vitest in interactive watch mode
@@ -244,11 +313,11 @@ npm run preview
 
 ---
 
-## 9. GitHub Pages Deployment
+## 10. GitHub Pages Deployment
 
 RepoHealth is configured for automated continuous deployment to **GitHub Pages** via GitHub Actions.
 
-- **Expected Live URL:** `https://hafiz-hamza-liaqat.github.io/repo-health/`
+- **Live URL:** `https://hafiz-hamza-liaqat.github.io/repo-health/`
 - **CI/CD Pipeline File:** `.github/workflows/main.yml`
 
 ### Deployment Architecture
@@ -275,27 +344,28 @@ To enable automated deployment on GitHub:
 
 ---
 
-## 10. API Limitations & Rate Limits
+## 11. API Limitations & Rate Limits
 
 - **Public Unauthenticated Limit:** The GitHub REST API permits **60 requests per hour** per IP address.
 - **Memory Token Upgrade:** Users can click the key icon in the navigation bar to provide an optional Personal Access Token (held strictly in JavaScript memory during the active session), which immediately upgrades their rate limit to **5,000 requests per hour**.
-- **Graceful Partial Results:** If secondary endpoints fail (e.g., GitHub Actions runs endpoint returns 403 or 404), RepoHealth does not crash; it logs the reduced coverage and calculates the score with clear limitation notes.
+- **Graceful Partial Results:** If secondary endpoints fail (e.g., GitHub Actions runs endpoint returns 403 or 404, or workflow retrieval quota is exhausted), RepoHealth does not crash; it logs the reduced coverage and calculates the score with clear limitation notes.
 
 ---
 
-## 11. Privacy & Security Considerations
+## 12. Privacy & Security Considerations
 
-- **Untrusted Content Safety:** All text extracted from repositories and README files is treated as untrusted data and sanitized to prevent script injection.
+- **Untrusted Content Safety:** All text extracted from repositories, README files, and workflow YAML definitions is treated as untrusted data and sanitized to prevent script injection.
 - **No Code Execution:** Repository code is analyzed strictly via metadata, structure, and file contents. No repository code is downloaded or executed locally.
 - **Credential Safety:** RepoHealth contains no hardcoded tokens, client secrets, or private keys. Optional user-provided tokens are held solely in JavaScript memory for the current browser session (never written to `localStorage` or `sessionStorage`) and are discarded on tab close or page reload.
+- **Bounded Resource Consumption:** Workflow retrieval is strictly guarded against memory exhaustion, recursive amplification, or oversized payload denial-of-service.
 
 ---
 
-## 12. Current Limitations & Roadmap
+## 13. Current Limitations & Roadmap
 
-### Phase 2 Scope & Limitations
+### Phase 2.1 Scope & Limitations
 - **Public Repositories Only:** Exclusively analyzes public GitHub repositories.
-- **Static Structural Inspection:** Evaluates test infrastructure and test files; does not execute test suites or measure runtime test coverage percentages.
+- **Static Structural & Heuristic Inspection:** Evaluates test infrastructure, test files, and workflow definitions via static AST analysis; does not execute test suites, run dynamic penetration testing, or measure runtime test coverage percentages.
 - **Defensible AI Signals:** Reports explicit AI configuration files (`.cursorrules`, Copilot instructions) or documentation acknowledgments rather than guessing speculative AI-generated percentages.
 
 ### Roadmap

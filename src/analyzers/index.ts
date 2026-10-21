@@ -54,8 +54,8 @@ export function runAllAnalyzers(raw: RawAnalysisData): AnalysisOutcome {
     repo
   );
 
-  // 4. Security Hygiene indicators (Phase 2.1A)
-  const securityHygiene = analyzeSecurityHygiene(raw.tree, rootFiles);
+  // 4. Security Hygiene indicators & Workflow Security (Phase 2.1)
+  const securityHygiene = analyzeSecurityHygiene(raw.tree, rootFiles, raw.workflowSecurityReport);
 
   // 5. Calculate API endpoint responses and repository tree coverage
   const totalEndpoints = 10; // repo, languages, readme, license, workflows, runs, releases, tags, contents, tree

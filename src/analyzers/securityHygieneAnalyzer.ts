@@ -7,6 +7,7 @@
 
 import { GitTreeData } from '../types/analysis';
 import { SecurityFinding, SecurityHygieneAssessment } from '../types/security';
+import type { WorkflowSecurityAnalysisReport } from '../services/githubApi';
 
 // 1. Security policy locations
 const SECURITY_POLICY_PATTERNS = [
@@ -242,7 +243,8 @@ export function isSbomCandidatePath(path: string): boolean {
  */
 export function analyzeSecurityHygiene(
   tree: GitTreeData | null,
-  rootFiles: string[] = []
+  rootFiles: string[] = [],
+  workflowReport?: WorkflowSecurityAnalysisReport
 ): SecurityHygieneAssessment {
   const treeItems = tree?.items || [];
   const hasTree = tree !== null && treeItems.length > 0;
@@ -530,13 +532,62 @@ export function analyzeSecurityHygiene(
     });
   }
 
+  // ==========================================
+  // Phase 2.1B: Incorporate Workflow Security Findings (WFL-01 to WFL-04)
+  // ==========================================
+  if (workflowReport && workflowReport.assessments) {
+    for (const assessment of workflowReport.assessments) {
+      for (const f of assessment.findings) {
+        findings.push({
+          id: `WFL-${assessment.filePath}-${f.id}`,
+          ruleId: f.ruleId,
+          title: `${f.title} (${assessment.filePath})`,
+          status: f.status,
+          severity: f.severity,
+          explanation: f.explanation,
+          evidence: f.evidence
+            ? {
+                label: f.evidence.label,
+                value: f.evidence.value,
+                sourcePath: f.evidence.sourcePath || assessment.filePath,
+                line: f.evidence.line,
+                column: f.evidence.column,
+              }
+            : undefined,
+          recommendation: f.recommendation,
+          confidence: 'high',
+        });
+      }
+    }
+  }
+
   const summary = {
     passCount: findings.filter((f) => f.status === 'pass').length,
     warningCount: findings.filter((f) => f.status === 'warning').length,
     issueCount: findings.filter((f) => f.status === 'issue').length,
     notDetectedCount: findings.filter((f) => f.status === 'not_detected').length,
     unknownCount: findings.filter((f) => f.status === 'unknown').length,
+    notApplicableCount: findings.filter((f) => f.status === 'not_applicable').length,
   };
+
+  const workflowCoverage = workflowReport
+    ? {
+        status: workflowReport.overallCoverage,
+        discoveredCount: workflowReport.retrieval.summary.discoveredCount,
+        retrievedCount: workflowReport.retrieval.summary.retrievedCount,
+        skippedCount: workflowReport.retrieval.summary.skippedCount,
+        failedCount: workflowReport.retrieval.summary.failedCount,
+        totalBytesRetrieved: workflowReport.retrieval.summary.totalBytesRetrieved,
+        notes: workflowReport.retrieval.coverageNotes,
+        workflowFiles: workflowReport.assessments.map((a) => ({
+          path: a.filePath,
+          status: a.parseSuccess ? 'analyzed' : (a.parseError?.code || 'skipped'),
+          byteLength: workflowReport.retrieval.retrievedWorkflows.find((w) => w.path === a.filePath)?.byteLength,
+          parseSuccess: a.parseSuccess,
+          error: a.parseError?.message,
+        })),
+      }
+    : undefined;
 
   return {
     findings,
@@ -545,6 +596,7 @@ export function analyzeSecurityHygiene(
       treeStatus,
       inspectedPathsCount: inspectedCount,
       notes,
+      workflowCoverage,
     },
   };
 }

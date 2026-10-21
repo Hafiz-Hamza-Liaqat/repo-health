@@ -58,16 +58,37 @@ export function generateMarkdownSummary(report: RepoHealthReport): string {
   if (report.securityHygiene && report.securityHygiene.findings.length > 0) {
     lines.push('');
     lines.push('## Security & Supply-Chain Hygiene (Preliminary)');
+    const { summary, coverage } = report.securityHygiene;
+    const summaryParts = [
+      `Pass: ${summary.passCount}`,
+      summary.issueCount > 0 ? `Issue: ${summary.issueCount}` : null,
+      summary.warningCount > 0 ? `Warning: ${summary.warningCount}` : null,
+      summary.notDetectedCount > 0 ? `Not Detected: ${summary.notDetectedCount}` : null,
+      summary.unknownCount > 0 ? `Indeterminate: ${summary.unknownCount}` : null,
+      summary.notApplicableCount > 0 ? `Not Applicable: ${summary.notApplicableCount}` : null,
+    ].filter(Boolean).join(' | ');
+
+    lines.push(`*Summary:* ${summaryParts}`);
+    if (coverage.workflowCoverage) {
+      lines.push(
+        `*Workflow Retrieval Coverage:* ${coverage.workflowCoverage.status.toUpperCase()} (${coverage.workflowCoverage.retrievedCount}/${coverage.workflowCoverage.discoveredCount} workflows retrieved, ${coverage.workflowCoverage.totalBytesRetrieved} bytes)`
+      );
+    }
+    lines.push('');
+
     report.securityHygiene.findings.forEach((f) => {
-      const statusIcon =
-        f.status === 'pass'
-          ? '✅ Pass'
-          : f.status === 'warning'
-          ? '⚠️ Warning'
-          : f.status === 'unknown'
-          ? '❓ Unknown'
-          : '⚪ Not Detected';
-      lines.push(`- **[${f.ruleId}] ${f.title}:** ${statusIcon} — ${f.explanation}`);
+      let statusIcon = '⚪ Not Detected';
+      if (f.status === 'pass') statusIcon = '✅ Pass';
+      else if (f.status === 'issue') statusIcon = '❌ Issue';
+      else if (f.status === 'warning') statusIcon = '⚠️ Warning';
+      else if (f.status === 'unknown') statusIcon = '❓ Unknown';
+      else if (f.status === 'not_applicable') statusIcon = '➖ Not Applicable';
+      else if (f.status === 'not_detected') statusIcon = '⚪ Not Detected';
+
+      const location = f.evidence?.sourcePath
+        ? ` (${f.evidence.sourcePath}${f.evidence.line ? `:${f.evidence.line}` : ''})`
+        : '';
+      lines.push(`- **[${f.ruleId}] ${f.title}:** ${statusIcon}${location} — ${f.explanation}`);
     });
   }
 
