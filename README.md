@@ -40,7 +40,7 @@ A visual walkthrough of RepoHealth scanning `Hafiz-Hamza-Liaqat/repo-health`:
 
 ### Repository Overview & Scoring Perspectives
 ![Repository Overview & Dynamic Perspectives](docs/screenshots/report-overview.png)
-*Figure 2: Comprehensive repository health overview displaying letter grade (A+), dynamic perspective switcher, score breakdown, technology stack badges, and prioritized recommendations.*
+*Figure 2: Comprehensive repository health overview displaying letter grade (Grade A / 85 pts), dynamic perspective switcher, score breakdown, technology stack badges, and prioritized recommendations.*
 
 ### Category Findings & Evidence Verification
 ![Category Findings & Evidence](docs/screenshots/report-findings.png)
@@ -107,8 +107,8 @@ RepoHealth provides a transparent, client-side evaluation workflow:
 - **Icons:** Lucide React
 - **API Client:** GitHub REST API v3 with rate-limit tracking, session caching, and tree-based recursive queries
 - **Testing:**
-  - **Vitest & React Testing Library:** 68 automated unit, analyzer, engine, service, and component tests across 6 test files
-  - **Playwright:** 3 critical browser end-to-end user workflows
+  - **Vitest & React Testing Library:** 85 automated unit, analyzer, engine, service, and component tests across 6 test files
+  - **Playwright:** 3 critical browser end-to-end user workflows across Chromium
 - **Code Quality:** ESLint (`@typescript-eslint`), Prettier, TypeScript compiler (`tsc --noEmit`)
 - **CI/CD:** GitHub Actions workflow executing quality checks and automated deployment to GitHub Pages
 
@@ -223,13 +223,13 @@ npm run typecheck
 # 2. Lint TypeScript and React source files (zero warnings allowed)
 npm run lint
 
-# 3. Run all unit and integration tests (Vitest: 68 tests across 6 files)
+# 3. Run all unit and integration tests (Vitest: 85 tests across 6 files)
 npm run test
 
 # 4. Run Vitest in interactive watch mode
 npm run test:watch
 
-# 5. Run end-to-end browser journeys (Playwright)
+# 5. Run end-to-end browser journeys (Playwright: 3 critical browser user workflows across Chromium)
 npm run test:e2e
 
 # 6. Compile production bundle for local hosting

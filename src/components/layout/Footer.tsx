@@ -17,7 +17,7 @@ export const Footer: React.FC = () => {
             Assessments are automated indicators based strictly on public repository data.
           </p>
           <p className="text-slate-600">
-            Phase 1 supports public repositories without requiring credentials or private access.
+            Phase 2 supports public repositories without requiring credentials or private access.
           </p>
         </div>
       </div>

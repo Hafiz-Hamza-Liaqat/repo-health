@@ -31,7 +31,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenSettings, onReset }) => {
             <div className="flex items-center gap-2">
               <span className="font-bold text-lg text-white tracking-tight">RepoHealth</span>
               <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-950/80 border border-emerald-800 text-emerald-300">
-                Phase 1 MVP
+                Phase 2
               </span>
             </div>
             <p className="hidden md:block text-xs text-slate-400 leading-tight">
