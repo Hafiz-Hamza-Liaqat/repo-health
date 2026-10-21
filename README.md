@@ -3,7 +3,7 @@
 **Tagline:** *Evaluate code. Verify evidence. Make better hiring decisions.*  
 **GitHub Repository:** [repo-health](https://github.com/Hafiz-Hamza-Liaqat/repo-health)
 
-**Product Version:** `2.1.0 (Phase 2.1 Security & Supply-Chain Hygiene with Bounded GitHub Actions Workflow Analysis)`
+**Product Version:** `2.1.1 (Consolidated Report-Fidelity Hotfix)`
 
 **License:** [MIT](LICENSE)
 
@@ -127,7 +127,7 @@ RepoHealth provides a transparent, client-side evaluation workflow:
 - **YAML Parser:** `yaml` (`^2.9.1`) with visitor-based AST navigation and source coordinate mapping
 - **API Client:** GitHub REST API v3 with rate-limit tracking, session caching, bounded backoff retries, and tree-based recursive queries
 - **Testing:**
-  - **Vitest & React Testing Library:** 292 automated unit, analyzer, engine, service, component, and integration tests across 11 test files
+  - **Vitest & React Testing Library:** 298 automated unit, analyzer, engine, service, component, and integration tests across 11 test files
   - **Playwright:** 3 critical browser end-to-end user workflows across Chromium
 - **Code Quality:** ESLint (`@typescript-eslint`), Prettier, TypeScript compiler (`tsc --noEmit`)
 - **CI/CD:** GitHub Actions workflow executing quality checks and automated deployment to GitHub Pages
@@ -292,7 +292,7 @@ npm run typecheck
 # 2. Lint TypeScript and React source files (zero warnings allowed)
 npm run lint
 
-# 3. Run all unit, analyzer, and integration tests (Vitest: 292 tests across 11 files)
+# 3. Run all unit, analyzer, and integration tests (Vitest: 298 tests across 11 files)
 npm run test
 
 # 4. Run Vitest in interactive watch mode

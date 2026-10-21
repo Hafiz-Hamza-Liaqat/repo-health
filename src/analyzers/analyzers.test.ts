@@ -619,6 +619,89 @@ RepoHealth evaluates GitHub repositories.
       expect(lic01?.status).toBe('issue');
       expect(lic01?.severity).toBe('high');
     });
+
+    it('should handle Strideto scenario: root LICENSE file exists with NOASSERTION metadata', () => {
+      const stridetoRepo = {
+        ...mockRepoData,
+        license: {
+          key: 'other',
+          name: 'Other',
+          spdx_id: 'NOASSERTION',
+          url: null,
+          node_id: 'MDc6TGljZW5zZTA=',
+        },
+      };
+      const stridetoLicense = {
+        name: 'LICENSE',
+        path: 'LICENSE',
+        sha: 'strideto-lic-sha',
+        size: 1024,
+        url: '',
+        html_url: '',
+        download_url: '',
+        content: btoa('Custom commercial or unparsed license terms...'),
+        encoding: 'base64',
+        decodedContent: 'Custom commercial or unparsed license terms...',
+        license: {
+          key: 'other',
+          name: 'Other',
+          spdx_id: 'NOASSERTION',
+          url: null,
+          node_id: 'MDc6TGljZW5zZTA=',
+        },
+      };
+
+      const findings = analyzeLicense(stridetoLicense, stridetoRepo, ['LICENSE', 'README.md']);
+
+      const lic01 = findings.find((f) => f.ruleId === 'LIC-01');
+      expect(lic01).toBeDefined();
+      expect(lic01?.status).toBe('warning');
+      expect(lic01?.title).toBe('Unrecognized or Unverified License Metadata');
+      expect(lic01?.scoreEffect).toBe(3); // Math.floor(7 / 2)
+      // Must not falsely claim the repository is unlicensed
+      expect(lic01?.explanation).toContain('not unlicensed');
+      expect(lic01?.explanation).toContain('NOASSERTION');
+      // Must not recommend adding a duplicate license file
+      expect(lic01?.recommendation).not.toContain('Place a dedicated LICENSE');
+      expect(lic01?.recommendation).not.toContain('Add a dedicated LICENSE');
+
+      const lic02 = findings.find((f) => f.ruleId === 'LIC-02');
+      expect(lic02).toBeDefined();
+      expect(lic02?.status).toBe('pass');
+      expect(lic02?.scoreEffect).toBe(5);
+      expect(lic02?.title).toContain('LICENSE');
+
+      const lic03 = findings.find((f) => f.ruleId === 'LIC-03');
+      expect(lic03).toBeDefined();
+      expect(lic03?.status).toBe('warning');
+      expect(lic03?.title).toBe('License Terms Unverified in Repository Metadata');
+      expect(lic03?.scoreEffect).toBe(1);
+      // Must accurately distinguish file presence from unverified metadata
+      expect(lic03?.explanation).toContain('dedicated license file exists');
+      expect(lic03?.explanation).toContain('NOASSERTION');
+    });
+
+    it('should handle Ecommerce Furniture Store scenario: neither root LICENSE file nor license metadata exists', () => {
+      const ecomRepo = { ...mockRepoData, license: null };
+      const findings = analyzeLicense(null, ecomRepo, ['README.md', 'package.json']);
+
+      const lic01 = findings.find((f) => f.ruleId === 'LIC-01');
+      expect(lic01?.status).toBe('issue');
+      expect(lic01?.severity).toBe('high');
+      expect(lic01?.scoreEffect).toBe(0);
+      expect(lic01?.explanation).toContain('Neither a dedicated root license file nor recognized license metadata');
+
+      const lic02 = findings.find((f) => f.ruleId === 'LIC-02');
+      expect(lic02?.status).toBe('issue');
+      expect(lic02?.scoreEffect).toBe(0);
+      expect(lic02?.title).toBe('Dedicated License File Not Found in Root');
+
+      const lic03 = findings.find((f) => f.ruleId === 'LIC-03');
+      expect(lic03?.status).toBe('issue');
+      expect(lic03?.severity).toBe('high');
+      expect(lic03?.scoreEffect).toBe(0);
+      expect(lic03?.title).toBe('No Licensing or Distribution Terms Established');
+    });
   });
 
   describe('CI/CD Workflow Analyzer', () => {
@@ -742,6 +825,199 @@ RepoHealth evaluates GitHub repositories.
       const tst03 = findings.find((f) => f.ruleId === 'TST-03');
       expect(tst03?.status).toBe('unknown');
       expect(tst03?.explanation).toContain('truncated');
+    });
+
+    it('should handle Token-Unlock-Intelligence-MCP scenario: custom validation script without conventional test specs', () => {
+      const tokenUnlockRaw: typeof mockRawAnalysisData = {
+        ...mockRawAnalysisData,
+        rootFiles: ['package.json', 'README.md', 'src'],
+        tree: {
+          items: [
+            { path: 'package.json', mode: '100644', type: 'blob' as const, sha: 'p1', url: '' },
+            { path: 'src/index.ts', mode: '100644', type: 'blob' as const, sha: 'i1', url: '' },
+            { path: 'src/services/unlockService.ts', mode: '100644', type: 'blob' as const, sha: 's1', url: '' },
+            { path: 'src/scripts/testUnlockCoverage.ts', mode: '100644', type: 'blob' as const, sha: 't1', url: '' },
+          ],
+          isTruncated: false,
+          totalItemsCount: 4,
+        },
+        manifestContents: {
+          packageJson: {
+            name: 'token-unlock-intelligence-mcp',
+            scripts: {
+              build: 'tsc',
+              test: 'tsx src/scripts/testUnlockCoverage.ts',
+            },
+          },
+        },
+      };
+
+      const findings = analyzeTestingEvidence(tokenUnlockRaw, mockRepoData);
+
+      // TST-01: Framework not detected, but notes custom verification script
+      const tst01 = findings.find((f) => f.ruleId === 'TST-01');
+      expect(tst01?.status).toBe('not_detected');
+      expect(tst01?.severity).toBe('medium');
+      expect(tst01?.explanation).toContain('testUnlockCoverage.ts');
+
+      // TST-02: Executable test script declared in package.json
+      const tst02 = findings.find((f) => f.ruleId === 'TST-02');
+      expect(tst02?.status).toBe('pass');
+      expect(tst02?.evidence?.value).toContain('npm run test');
+
+      // TST-03: Recognizes custom test script, does not treat as full conventional test suite
+      const tst03 = findings.find((f) => f.ruleId === 'TST-03');
+      expect(tst03?.status).toBe('warning');
+      expect(tst03?.title).toBe('Custom Test or Validation Script Detected (1 script)');
+      expect(tst03?.scoreEffect).toBe(2); // 2 of 5 points (Math.floor(5/2)), not full 5
+      expect(tst03?.explanation).toContain('src/scripts/testUnlockCoverage.ts');
+      // Must not make the absolute claim that no automated validation file exists
+      expect(tst03?.explanation).not.toContain('No automated test files');
+      expect(tst03?.evidence?.sourcePath).toBe('src/scripts/testUnlockCoverage.ts');
+    });
+
+    it('should NOT award custom test credit to ordinary deployment, import, or build scripts under scripts/ or tools/', () => {
+      const deployScriptsRaw: typeof mockRawAnalysisData = {
+        ...mockRawAnalysisData,
+        rootFiles: ['package.json', 'README.md', 'scripts', 'tools'],
+        tree: {
+          items: [
+            { path: 'package.json', mode: '100644', type: 'blob' as const, sha: 'p1', url: '' },
+            { path: 'README.md', mode: '100644', type: 'blob' as const, sha: 'r1', url: '' },
+            { path: 'scripts/deploy.ts', mode: '100644', type: 'blob' as const, sha: 'd1', url: '' },
+            { path: 'scripts/importData.js', mode: '100644', type: 'blob' as const, sha: 'i1', url: '' },
+            { path: 'scripts/seedDatabase.ts', mode: '100644', type: 'blob' as const, sha: 's1', url: '' },
+            { path: 'scripts/latestRelease.ts', mode: '100644', type: 'blob' as const, sha: 'l1', url: '' },
+            { path: 'tools/buildSchema.ts', mode: '100644', type: 'blob' as const, sha: 'b1', url: '' },
+            { path: 'bin/run-service.sh', mode: '100644', type: 'blob' as const, sha: 'rs1', url: '' },
+          ],
+          isTruncated: false,
+          totalItemsCount: 8,
+        },
+        manifestContents: {
+          packageJson: {
+            name: 'deploy-utility-app',
+            scripts: {
+              deploy: 'tsx scripts/deploy.ts',
+              build: 'tsx tools/buildSchema.ts',
+            },
+          },
+        },
+      };
+
+      const findings = analyzeTestingEvidence(deployScriptsRaw, mockRepoData);
+
+      // TST-01: Framework not detected, high severity (no test framework and no test scripts)
+      const tst01 = findings.find((f) => f.ruleId === 'TST-01');
+      expect(tst01?.status).toBe('not_detected');
+      expect(tst01?.severity).toBe('high');
+      expect(tst01?.explanation).not.toContain('deploy.ts');
+
+      // TST-02: No test script found
+      const tst02 = findings.find((f) => f.ruleId === 'TST-02');
+      expect(tst02?.status).toBe('not_detected');
+
+      // TST-03: Must NOT receive custom test credit or warning
+      const tst03 = findings.find((f) => f.ruleId === 'TST-03');
+      expect(tst03?.status).toBe('not_detected');
+      expect(tst03?.severity).toBe('high');
+      expect(tst03?.scoreEffect).toBe(0);
+      expect(tst03?.title).toBe('No Automated Test Files or Test Directories Detected');
+    });
+
+    it('should handle repository with neither conventional tests nor custom test scripts (Ecommerce Furniture Store scenario)', () => {
+      const ecomRaw: typeof mockRawAnalysisData = {
+        ...mockRawAnalysisData,
+        rootFiles: ['package.json', 'README.md', 'src'],
+        tree: {
+          items: [
+            { path: 'package.json', mode: '100644', type: 'blob' as const, sha: 'p1', url: '' },
+            { path: 'src/App.tsx', mode: '100644', type: 'blob' as const, sha: 'a1', url: '' },
+            { path: 'src/components/Header.tsx', mode: '100644', type: 'blob' as const, sha: 'h1', url: '' },
+            { path: 'src/styles/main.css', mode: '100644', type: 'blob' as const, sha: 'c1', url: '' },
+          ],
+          isTruncated: false,
+          totalItemsCount: 4,
+        },
+        manifestContents: {
+          packageJson: {
+            name: 'ecommerce-furniture-store',
+            scripts: {
+              dev: 'vite',
+              build: 'vite build',
+            },
+          },
+        },
+      };
+
+      const findings = analyzeTestingEvidence(ecomRaw, mockRepoData);
+
+      const tst01 = findings.find((f) => f.ruleId === 'TST-01');
+      expect(tst01?.status).toBe('not_detected');
+      expect(tst01?.severity).toBe('high');
+
+      const tst02 = findings.find((f) => f.ruleId === 'TST-02');
+      expect(tst02?.status).toBe('not_detected');
+      expect(tst02?.title).toBe('No Executable Test Script Found in Project Manifest');
+
+      const tst03 = findings.find((f) => f.ruleId === 'TST-03');
+      expect(tst03?.status).toBe('not_detected');
+      expect(tst03?.severity).toBe('high');
+      expect(tst03?.scoreEffect).toBe(0);
+      expect(tst03?.title).toBe('No Automated Test Files or Test Directories Detected');
+      expect(tst03?.explanation).toContain('custom validation scripts');
+    });
+
+    it('should handle npm-workspace monorepo with root and nested package manifests and test files in multiple directories', () => {
+      const monorepoRaw: typeof mockRawAnalysisData = {
+        ...mockRawAnalysisData,
+        rootFiles: ['package.json', 'README.md', 'packages'],
+        tree: {
+          items: [
+            { path: 'package.json', mode: '100644', type: 'blob' as const, sha: 'p0', url: '' },
+            { path: 'packages/core/package.json', mode: '100644', type: 'blob' as const, sha: 'p1', url: '' },
+            { path: 'packages/core/src/index.ts', mode: '100644', type: 'blob' as const, sha: 'c1', url: '' },
+            { path: 'packages/core/src/index.test.ts', mode: '100644', type: 'blob' as const, sha: 'ct1', url: '' },
+            { path: 'packages/utils/package.json', mode: '100644', type: 'blob' as const, sha: 'p2', url: '' },
+            { path: 'packages/utils/src/helpers.ts', mode: '100644', type: 'blob' as const, sha: 'u1', url: '' },
+            { path: 'packages/utils/tests/helpers.spec.ts', mode: '100644', type: 'blob' as const, sha: 'ut1', url: '' },
+          ],
+          isTruncated: false,
+          totalItemsCount: 7,
+        },
+        manifestContents: {
+          packageJson: {
+            name: 'acme-monorepo',
+            workspaces: ['packages/*'],
+            scripts: {
+              build: 'turbo run build',
+              lint: 'turbo run lint',
+              // No root test script
+            },
+          },
+        },
+      };
+
+      const findings = analyzeTestingEvidence(monorepoRaw, mockRepoData);
+
+      // TST-02: Expresses root manifest limitation without asserting nested workspace scripts do not exist
+      const tst02 = findings.find((f) => f.ruleId === 'TST-02');
+      expect(tst02?.status).toBe('not_detected');
+      expect(tst02?.title).toBe('No Workspace-Wide Test Script in Root Manifest');
+      expect(tst02?.explanation).toContain('nested package workspaces may declare local test scripts');
+      expect(tst02?.explanation).toContain('nested manifests are not retrieved during root evaluation');
+      expect(tst02?.recommendation).toContain('npm test --workspaces');
+
+      // TST-03: Describes total files discovered across tree, distributes across workspace packages, lists representative files
+      const tst03 = findings.find((f) => f.ruleId === 'TST-03');
+      expect(tst03?.status).toBe('pass');
+      expect(tst03?.scoreEffect).toBe(5);
+      expect(tst03?.title).toContain('2 files');
+      expect(tst03?.explanation).toContain('discovered across the repository tree');
+      expect(tst03?.explanation).toContain('distributed across 2 workspace packages (core, utils)');
+      // Must not falsely claim all test files are located in a single directory
+      expect(tst03?.explanation).not.toContain('in directory [packages/utils/tests]');
+      expect(tst03?.evidence?.value).toContain('packages/core/src/index.test.ts, packages/utils/tests/helpers.spec.ts');
     });
   });
 
